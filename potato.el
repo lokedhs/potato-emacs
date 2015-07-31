@@ -43,7 +43,9 @@
       (progn
         (goto-char (point-min))
         (search-forward "\n\n")
-        (let ((data (json-read)))
+        (let* ((content (buffer-substring (point) (point-max)))
+               (decoded-content (decode-coding-string content 'utf-8))
+               (data (json-read-from-string decoded-content)))
           (with-current-buffer buffer
             (funcall callback data)))))))
 
@@ -63,10 +65,44 @@
     (potato--url-retrieve (format "/channel/%s/create" potato--channel-id) "POST"
                           (lambda (data) (message "Message sent: %S" data)))))
 
+(defun potato--parse-json-decode-span (text face)
+  (let ((s (potato--parse-json-decode-element text)))
+    (propertize s 'font-lock-face face)))
+
+(defun potato--parse-json-decode-url (element)
+  (let ((addr (potato--assoc-with-check 'addr element))
+        (description (potato--assoc-with-check 'description element)))
+    (propertize description
+                'mouse-face 'hilight
+                'help-echo (format "mouse-2: browse url: %s" addr))))
+
+(defun potato--parse-json-decode-element (element)
+  (etypecase element
+    (string element)
+    (array (apply #'concat (loop for e across element collect (potato--parse-json-decode-element e))))
+    (cons (let ((type (potato--assoc-with-check 'type element)))
+            (cond ((string= type "p")
+                   (potato--parse-json-decode-element (potato--assoc-with-check 'e element)))
+                  ((string= type "b")
+                   (potato--parse-json-decode-span (potato--assoc-with-check 'e element) 'bold))
+                  ((string= type "i")
+                   (potato--parse-json-decode-span (potato--assoc-with-check 'e element) 'italic))
+                  ((string= type "code")
+                   (format "[%s]" (potato--parse-json-decode-span (potato--assoc-with-check 'e element) 'default)))
+                  ((string= type "url")
+                   (potato--parse-json-decode-url element))
+                  (t
+                   (princ "[unknown-element]")))))))
+
+(defun potato--parse-json-message (content)
+  (potato--parse-json-decode-element content))
+
 (defun potato--process-channel-message (message)
-  (let ((text (potato--assoc-with-check 'text message))
-        (from-name (potato--assoc-with-check 'from_name message)))
-    (lui-insert (format "%s: %s" from-name text))))
+  (let* ((text (potato--assoc-with-check 'text message))
+         (from-name (potato--assoc-with-check 'from_name message))
+         (parsed (potato--parse-json-message text)))
+    (message "Text: %S" parsed)
+    (lui-insert (format "%s: %s" from-name parsed))))
 
 (defun potato--process-new-message (message)
   (let ((type (potato--assoc-with-check 'type message)))
@@ -75,17 +111,23 @@
 
 (defun potato--fetch-message (queue buffer)
   (with-current-buffer buffer
-    (potato--url-retrieve (format "/channel/%s/updates?format=html%s"
-                                  potato--channel-id
-                                  (if queue (format "&event-id=%s" queue) ""))
-                          "GET"
-                          (lambda (data)
-                            (loop for message across (cdr (assoc 'data data))
-                                  do (potato--process-new-message message))
-                            (let ((queue (cdr (assoc 'event data))))
-                              (unless queue
-                                (error "No queue in channel update"))
-                              (potato--fetch-message queue buffer))))))
+    (let ((connection (potato--url-retrieve (format "/channel/%s/updates?format=json%s"
+                                                    potato--channel-id
+                                                    (if queue (format "&event-id=%s" queue) ""))
+                                            "GET"
+                                            (lambda (data)
+                                              (loop for message across (cdr (assoc 'data data))
+                                                    do (potato--process-new-message message))
+                                              (let ((queue (cdr (assoc 'event data))))
+                                                (unless queue
+                                                  (error "No queue in channel update"))
+                                                (potato--fetch-message queue buffer))))))
+      (setq potato--connection connection))))
+
+(defun potato--buffer-closed ()
+  (let ((connection potato--connection))
+    (when connection
+      (message "Need to stop outstanding connection"))))
 
 (define-derived-mode potato-mode lui-mode "Potato"
   "Potato channel mode"
@@ -100,7 +142,9 @@
       (setq-local potato--channel-id cid)
       (setq-local potato--active-url potato-url)
       (setq-local potato--active-api-token potato-api-token)
-      (potato--fetch-message nil buffer))
+      (make-local-variable 'potato--connection)
+      (potato--fetch-message nil buffer)
+      (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t))
     buffer))
 
 (defun potato--find-channel-buffer (cid)
