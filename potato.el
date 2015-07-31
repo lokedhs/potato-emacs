@@ -106,3 +106,5 @@
   (interactive)
   (let ((buffer (potato--create-buffer potato-channel-id)))
     (switch-to-buffer buffer)))
+
+(provide 'potato)
