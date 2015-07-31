@@ -93,18 +93,25 @@
   (goto-char (point-max))
   (setq lui-input-function 'potato--input))
 
-(defun potato--create-buffer (cid)
-  (let ((buffer (generate-new-buffer "*potato*")))
+(defun potato--create-buffer (name cid)
+  (let ((buffer (generate-new-buffer name)))
     (with-current-buffer buffer
       (potato-mode)
       (setq-local potato--channel-id cid)
       (setq-local potato--active-url potato-url)
       (setq-local potato--active-api-token potato-api-token)
-      (potato--fetch-message nil buffer))))
+      (potato--fetch-message nil buffer))
+    buffer))
+
+(defun potato--find-channel-buffer (cid)
+  (let* ((name (format "*potato-%s*" cid))
+         (buffer (or (get-buffer name)
+                     (potato--create-buffer name cid))))
+    buffer))
 
 (defun potato-client ()
   (interactive)
-  (let ((buffer (potato--create-buffer potato-channel-id)))
+  (let ((buffer (potato--find-channel-buffer potato-channel-id)))
     (switch-to-buffer buffer)))
 
 (provide 'potato)
