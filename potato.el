@@ -92,7 +92,7 @@
                   ((string= type "url")
                    (potato--parse-json-decode-url element))
                   (t
-                   (princ "[unknown-element]")))))))
+                   "[unknown-element]"))))))
 
 (defun potato--parse-json-message (content)
   (potato--parse-json-decode-element content))
