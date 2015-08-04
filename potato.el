@@ -126,6 +126,13 @@
                                                 (potato--fetch-message queue buffer))))))
       (setq potato--connection connection))))
 
+(cl-defun potato--load-history (&key (num-messages 50))
+  (potato--url-retrieve (format "/channel/%s/history?format=json&num=%d" potato--channel-id num-messages)
+                        "GET"
+                        (lambda (data)
+                          (loop for message across (potato--assoc-with-check 'messages data)
+                                do (potato--process-channel-message message)))))
+
 (defun potato--buffer-closed ()
   (let ((connection potato--connection))
     (when connection
@@ -140,6 +147,7 @@
       (setq-local potato--active-api-token potato-api-token)
       (setq potato--input-function 'potato--input)
       (make-local-variable 'potato--connection)
+      (potato--load-history)
       (potato--fetch-message nil buffer)
       (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t))
     buffer))
