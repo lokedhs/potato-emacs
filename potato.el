@@ -1,7 +1,7 @@
 ;;; -*- lexical-binding: t -*-
 
-(require 'lui)
 (require 'url)
+(require 'potato-channel)
 
 (defgroup potato nil
   "Potato client implementation for Emacs"
@@ -98,11 +98,13 @@
   (potato--parse-json-decode-element content))
 
 (defun potato--process-channel-message (message)
-  (let* ((text (potato--assoc-with-check 'text message))
+  (let* ((message-id (potato--assoc-with-check 'id message))
+         (timestamp (potato--assoc-with-check 'created_date message))
+         (text (potato--assoc-with-check 'text message))
+         (from (potato--assoc-with-check 'from message))
          (from-name (potato--assoc-with-check 'from_name message))
          (parsed (potato--parse-json-message text)))
-    (message "Text: %S" parsed)
-    (lui-insert (format "%s: %s" from-name parsed))))
+    (potato--insert-message message-id timestamp from-name parsed)))
 
 (defun potato--process-new-message (message)
   (let ((type (potato--assoc-with-check 'type message)))
@@ -129,19 +131,14 @@
     (when connection
       (message "Need to stop outstanding connection"))))
 
-(define-derived-mode potato-mode lui-mode "Potato"
-  "Potato channel mode"
-  (lui-set-prompt "channel> ")
-  (goto-char (point-max))
-  (setq lui-input-function 'potato--input))
-
 (defun potato--create-buffer (name cid)
   (let ((buffer (generate-new-buffer name)))
     (with-current-buffer buffer
-      (potato-mode)
+      (potato-channel-mode)
       (setq-local potato--channel-id cid)
       (setq-local potato--active-url potato-url)
       (setq-local potato--active-api-token potato-api-token)
+      (setq potato--input-function 'potato--input)
       (make-local-variable 'potato--connection)
       (potato--fetch-message nil buffer)
       (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t))

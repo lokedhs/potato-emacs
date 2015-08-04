@@ -4,7 +4,8 @@
   (interactive)
   (let ((text (buffer-substring potato--input-marker (point-max))))
     (delete-region potato--input-marker (point-max))
-    (message "Send text: %S" text)))
+    (when potato--input-function
+      (funcall potato--input-function text))))
 
 (defvar potato-channel-mode-map
   (let ((map (make-sparse-keymap)))
@@ -14,11 +15,21 @@
 (defun potato--insert-message (message-id timestamp from text)
   (save-excursion
     (goto-char potato--output-marker)
-    (let ((inhibit-read-only t))
-      (insert (propertize (format "[%s - %s] %s\n" timestamp from text)
-                          'read-only t
-                          'potato-message-id message-id
-                          'potato-timestamp timestamp)))))
+    (let ((new-pos (loop with prev-pos = (point)
+                         for pos = (previous-single-char-property-change prev-pos 'potato-timestamp)
+                         until (let ((prop (get-char-property pos 'potato-timestamp)))
+                                 (and prop (string< prop timestamp)))
+                         do (setq prev-pos pos)
+                         until (= pos (point-min))
+                         finally
+                         return prev-pos)))
+      (goto-char new-pos)
+      (let ((inhibit-read-only t))
+        (insert (propertize (format "[%s - %s] %s\n" timestamp from text)
+                            'read-only t
+                            'potato-message-id message-id
+                            'potato-timestamp timestamp
+                            'front-sticky '(read-only)))))))
 
 (define-derived-mode potato-channel-mode nil "Potato"
   "Mode for Potato channel content"
@@ -26,6 +37,7 @@
   (setq-local potato--output-marker (make-marker))
   (setq-local potato--input-marker (make-marker))
   (set-marker potato--output-marker (point-max))
+  (setq-local potato--input-function nil)
   (insert "channel> ")
   (add-text-properties (point-min) (point-max) '(read-only t rear-nonsticky t front-sticky (read-only)))
   (set-marker-insertion-type potato--output-marker t)
