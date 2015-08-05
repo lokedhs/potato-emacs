@@ -102,18 +102,23 @@
          (timestamp (potato--assoc-with-check 'created_date message))
          (text (potato--assoc-with-check 'text message))
          (from (potato--assoc-with-check 'from message))
-         (from-name (potato--assoc-with-check 'from_name message))
-         (parsed (potato--parse-json-message text)))
-    (potato--insert-message message-id timestamp from-name parsed)))
+         (parsed (potato--parse-json-message text))
+         (user (cl-assoc from potato--users :test #'equal)))
+    (potato--insert-message message-id timestamp (if user (second user) "Unknown") parsed)))
+
+(defun potato--process-channel-type-notification (message)
+  (message "typing: %S" message))
 
 (defun potato--process-new-message (message)
   (let ((type (potato--assoc-with-check 'type message)))
-    (when (potato--string-match-start type "msg-")
-      (potato--process-channel-message (potato--assoc-with-check 'element message)))))
+    (cond ((potato--string-match-start type "msg-")
+           (potato--process-channel-message (potato--assoc-with-check 'element message)))
+          ((string= type "type")
+           (potato--process-channel-type-notification (potato--assoc-with-check 'element message))))))
 
 (defun potato--fetch-message (queue buffer)
   (with-current-buffer buffer
-    (let ((connection (potato--url-retrieve (format "/channel/%s/updates?format=json%s"
+    (let ((connection (potato--url-retrieve (format "/channel/%s/updates?format=json&services=content,state%s"
                                                     potato--channel-id
                                                     (if queue (format "&event-id=%s" queue) ""))
                                             "GET"
@@ -138,6 +143,16 @@
     (when connection
       (message "Need to stop outstanding connection"))))
 
+(defun potato--request-user-list (callback)
+  (potato--url-retrieve (format "/channel/%s/users" potato--channel-id)
+                        "GET"
+                        (lambda (data)
+                          (funcall callback
+                                   (loop for ch across (potato--assoc-with-check 'members data)
+                                         collect (cons (potato--assoc-with-check 'id ch)
+                                                       (list (potato--assoc-with-check 'description ch)
+                                                             (potato--assoc-with-check 'image_name ch))))))))
+
 (defun potato--create-buffer (name cid)
   (let ((buffer (generate-new-buffer name)))
     (with-current-buffer buffer
@@ -145,9 +160,12 @@
       (setq-local potato--channel-id cid)
       (setq-local potato--active-url potato-url)
       (setq-local potato--active-api-token potato-api-token)
+      (setq-local potato--users nil)
       (setq potato--input-function 'potato--input)
       (make-local-variable 'potato--connection)
-      (potato--load-history)
+      (potato--request-user-list (lambda (users)
+                                   (setq potato--users users)
+                                   (potato--load-history)))
       (potato--fetch-message nil buffer)
       (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t))
     buffer))
