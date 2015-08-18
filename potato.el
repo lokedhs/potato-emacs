@@ -58,12 +58,13 @@
                      url)))
     (let ((buffer (current-buffer)))
       (url-retrieve url (lambda (status)
-                          (potato--url-handler status buffer callback))))))
+                          (potato--url-handler status buffer callback))
+                    nil t))))
 
 (defun potato--input (str)
   (let ((url-request-data (json-encode `((text . ,str)))))
     (potato--url-retrieve (format "/channel/%s/create" potato--channel-id) "POST"
-                          (lambda (data) (message "Message sent: %S" data)))))
+                          (lambda (data) nil))))
 
 (defun potato--parse-json-decode-span (text face)
   (let ((s (potato--parse-json-decode-element text)))
@@ -117,6 +118,8 @@
            (potato--process-channel-type-notification (potato--assoc-with-check 'element message))))))
 
 (defun potato--fetch-message (queue buffer)
+  (when potato--connection
+    (error "Attempt to fetch a new message while a current request is already active"))
   (with-current-buffer buffer
     (let ((connection (potato--url-retrieve (format "/channel/%s/updates?format=json&services=content,state%s"
                                                     potato--channel-id
@@ -128,6 +131,7 @@
                                               (let ((queue (cdr (assoc 'event data))))
                                                 (unless queue
                                                   (error "No queue in channel update"))
+                                                (setq potato--connection nil)
                                                 (potato--fetch-message queue buffer))))))
       (setq potato--connection connection))))
 
@@ -141,7 +145,10 @@
 (defun potato--buffer-closed ()
   (let ((connection potato--connection))
     (when connection
-      (message "Need to stop outstanding connection"))))
+      (let ((proc (get-buffer-process connection)))
+        (when proc
+          (message "Stopping outstanding connection")
+          (kill-process proc))))))
 
 (defun potato--request-user-list (callback)
   (potato--url-retrieve (format "/channel/%s/users" potato--channel-id)
@@ -161,6 +168,7 @@
       (setq-local potato--active-url potato-url)
       (setq-local potato--active-api-token potato-api-token)
       (setq-local potato--users nil)
+      (setq-local potato--connection nil)
       (setq potato--input-function 'potato--input)
       (make-local-variable 'potato--connection)
       (potato--request-user-list (lambda (users)
