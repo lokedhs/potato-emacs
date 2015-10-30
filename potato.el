@@ -112,16 +112,16 @@
 
 (defun potato--process-new-message (message)
   (let ((type (potato--assoc-with-check 'type message)))
-    (cond ((potato--string-match-start type "msg-")
-           (potato--process-channel-message (potato--assoc-with-check 'element message)))
+    (cond ((equal type "m")
+           (potato--process-channel-message (potato--assoc-with-check 'c message)))
           ((string= type "type")
-           (potato--process-channel-type-notification (potato--assoc-with-check 'element message))))))
+           (potato--process-channel-type-notification message)))))
 
 (defun potato--fetch-message (queue buffer)
   (when potato--connection
     (error "Attempt to fetch a new message while a current request is already active"))
   (with-current-buffer buffer
-    (let ((connection (potato--url-retrieve (format "/channel/%s/updates?format=json&services=content,state%s"
+    (let ((connection (potato--url-retrieve (format "/channel-updates?channels=%s&format=json&services=content,state%s"
                                                     potato--channel-id
                                                     (if queue (format "&event-id=%s" queue) ""))
                                             "GET"
