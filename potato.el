@@ -22,6 +22,15 @@
   "Face used to display the 'from' part of a message."
   :group 'potato)
 
+(defface potato-message-user-name
+  '((((class color))
+     :background "#e0e0e0"
+     :inherit potato-default)
+    (t
+     :inherit potato-default))
+  "Face used to display user names."
+  :group 'potato)
+
 (defcustom potato-api-token ""
   "API token for the user"
   :type 'string
@@ -106,6 +115,8 @@
                    (format "[%s]" (potato--parse-json-decode-span (potato--assoc-with-check 'e element) 'default)))
                   ((string= type "url")
                    (potato--parse-json-decode-url element))
+                  ((string= type "user")
+                   (propertize (potato--assoc-with-check 'user_description element) 'font-lock-face 'potato-message-user-name))
                   (t
                    (format "[unknown-element %s]" type)))))))
 

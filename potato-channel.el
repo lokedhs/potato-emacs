@@ -28,7 +28,7 @@
       (let ((inhibit-read-only t))
         (insert (propertize (concat (propertize (format "[%s] " from)
                                                 'face 'potato-message-from)
-                                    (propertize text 'face 'potato-default)
+                                    text
                                     "\n")
                             'read-only t
                             'potato-message-id message-id
