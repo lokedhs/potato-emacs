@@ -8,6 +8,20 @@
   :prefix 'potato
   :group 'applications)
 
+(defface potato-default
+  ()
+  "Default face for potato buffers."
+  :group 'potato)
+
+(defface potato-message-from
+  '((((class color))
+     :foreground "#00b000"
+     :inherit potato-default)
+    (t
+     :inherit potato-default))
+  "Face used to display the 'from' part of a message."
+  :group 'potato)
+
 (defcustom potato-api-token ""
   "API token for the user"
   :type 'string
@@ -93,7 +107,7 @@
                   ((string= type "url")
                    (potato--parse-json-decode-url element))
                   (t
-                   "[unknown-element]"))))))
+                   (format "[unknown-element %s]" type)))))))
 
 (defun potato--parse-json-message (content)
   (potato--parse-json-decode-element content))
@@ -126,12 +140,12 @@
                                                     (if queue (format "&event-id=%s" queue) ""))
                                             "GET"
                                             (lambda (data)
+                                              (setq potato--connection nil)
                                               (loop for message across (cdr (assoc 'data data))
                                                     do (potato--process-new-message message))
                                               (let ((queue (cdr (assoc 'event data))))
                                                 (unless queue
                                                   (error "No queue in channel update"))
-                                                (setq potato--connection nil)
                                                 (potato--fetch-message queue buffer))))))
       (setq potato--connection connection))))
 

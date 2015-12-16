@@ -2,10 +2,11 @@
 
 (defun potato-send-input-line ()
   (interactive)
-  (let ((text (buffer-substring potato--input-marker (point-max))))
-    (delete-region potato--input-marker (point-max))
-    (when potato--input-function
-      (funcall potato--input-function text))))
+  (let ((text (string-trim (buffer-substring potato--input-marker (point-max)))))
+    (when (not (equal text ""))
+      (delete-region potato--input-marker (point-max))
+      (when potato--input-function
+        (funcall potato--input-function text)))))
 
 (defvar potato-channel-mode-map
   (let ((map (make-sparse-keymap)))
@@ -25,7 +26,10 @@
                          return prev-pos)))
       (goto-char new-pos)
       (let ((inhibit-read-only t))
-        (insert (propertize (format "[%s - %s] %s\n" timestamp from text)
+        (insert (propertize (concat (propertize (format "[%s] " from)
+                                                'face 'potato-message-from)
+                                    (propertize text 'face 'potato-default)
+                                    "\n")
                             'read-only t
                             'potato-message-id message-id
                             'potato-timestamp timestamp
