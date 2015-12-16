@@ -40,6 +40,15 @@
   "Face used to display user names."
   :group 'potato)
 
+(defface potato-message-code
+  '((((class color))
+     :background "#f0f0f0"
+     :inherit potato-default)
+    (t
+     :inherit potato-default))
+  "Face used to display code snippets."
+  :group 'potato)
+
 (defcustom potato-api-token ""
   "API token for the user"
   :type 'string
@@ -121,11 +130,15 @@
                   ((string= type "i")
                    (potato--parse-json-decode-span (potato--assoc-with-check 'e element) 'italic))
                   ((string= type "code")
-                   (format "[%s]" (potato--parse-json-decode-span (potato--assoc-with-check 'e element) 'default)))
+                   (potato--parse-json-decode-span (potato--assoc-with-check 'e element) 'potato-message-code))
+                  ((string= type "code-block")
+                   (format "\n%s\n" (potato--parse-json-decode-span (potato--assoc-with-check 'code element) 'potato-message-code)))
                   ((string= type "url")
                    (potato--parse-json-decode-url element))
                   ((string= type "user")
                    (propertize (potato--assoc-with-check 'user_description element) 'font-lock-face 'potato-message-user-name))
+                  ((string= type "newline")
+                   "\n")
                   (t
                    (format "[unknown-element %s]" type)))))))
 
@@ -139,7 +152,7 @@
          (from (potato--assoc-with-check 'from message))
          (parsed (potato--parse-json-message text))
          (user (cl-assoc from potato--users :test #'equal)))
-    (potato--insert-message message-id timestamp (if user (second user) "Unknown") parsed)))
+    (potato--insert-message message-id timestamp (if user (second user) "Unknown") (string-trim parsed))))
 
 (defun potato--process-channel-type-notification (message)
   (message "typing: %S" message))
