@@ -31,6 +31,15 @@
   "Face used to display user names."
   :group 'potato)
 
+(defface potato-message-input-user-name
+  '((((class color))
+     :background "#e0e0e0"
+     :inherit potato-default)
+    (t
+     :inherit potato-default))
+  "Face used to display user names."
+  :group 'potato)
+
 (defcustom potato-api-token ""
   "API token for the user"
   :type 'string
@@ -85,7 +94,7 @@
                     nil t))))
 
 (defun potato--input (str)
-  (let ((url-request-data (json-encode `((text . ,str)))))
+  (let ((url-request-data (encode-coding-string (json-encode `((text . ,str))) 'utf-8)))
     (potato--url-retrieve (format "/channel/%s/create" potato--channel-id) "POST"
                           (lambda (data) nil))))
 
@@ -135,12 +144,38 @@
 (defun potato--process-channel-type-notification (message)
   (message "typing: %S" message))
 
+(defun potato--update-active-state-for-user-from-id (uid new-state)
+  (if potato--users
+      (let* ((element (find uid potato--users :key #'car :test #'equal)))
+        (if element
+            (setf (cdr (nthcdr 2 element)) (list new-state))
+          ;; ELSE: User was not found in user list, add a stub entry and request an update
+          (push (list uid "(loading)" nil new-state) potato--users)))
+    ;; ELSE: User list has not been updated yet, add the request to pending
+    (cl-pushnew (list uid new-state) potato--pending-user-state :key #'car :test #'equal)))
+
+(defun potato--update-active-state-for-user-from-message (message new-state)
+  (potato--update-active-state-for-user-from-id (potato--assoc-with-check 'user message) new-state))
+
+(defun potato--process-channel-update-user (message)
+  (let ((type (potato--assoc-with-check 'add-type message)))
+    (cond ((string= type "add")
+           (potato--update-active-state-for-user-from-message message t))
+          ((string= type "remove")
+           (potato--update-active-state-for-user-from-message message nil))
+          (t
+           (message "Unexpected user update message: %S" message)))))
+
 (defun potato--process-new-message (message)
   (let ((type (potato--assoc-with-check 'type message)))
     (cond ((equal type "m")
            (potato--process-channel-message (potato--assoc-with-check 'c message)))
           ((string= type "type")
-           (potato--process-channel-type-notification message)))))
+           (potato--process-channel-type-notification message))
+          ((string= type "cu")
+           (potato--process-channel-update-user message))
+          (t
+           (message "Unprocessed message: %S" message)))))
 
 (defun potato--fetch-message (queue buffer)
   (when potato--connection
@@ -173,7 +208,9 @@
       (let ((proc (get-buffer-process connection)))
         (when proc
           (message "Stopping outstanding connection")
-          (kill-process proc))))))
+          (condition-case condition
+              (kill-process proc)
+            (error (message "Error when closing buffer: %S" condition))))))))
 
 (defun potato--request-user-list (callback)
   (potato--url-retrieve (format "/channel/%s/users" potato--channel-id)
@@ -194,6 +231,7 @@
       (setq-local potato--active-api-token potato-api-token)
       (setq-local potato--users nil)
       (setq-local potato--connection nil)
+      (setq-local potato--pending-user-state nil)
       (setq potato--input-function 'potato--input)
       (make-local-variable 'potato--connection)
       (potato--request-user-list (lambda (users)
