@@ -8,7 +8,6 @@
     (with-output-to-string
       (loop with p = start
             for uid-ref in (sort uid-refs (lambda (a b) (< (first a) (first b))))
-            do (message "p=%S, uid-ref=%S" p uid-ref)
             if (< p (first uid-ref))
             do (princ (buffer-substring p (first uid-ref)))
             do (progn
