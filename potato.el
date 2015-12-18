@@ -206,10 +206,13 @@
 (defun potato--after-user-change-modification (start end &rest ignore)
   (let ((inhibit-modification-hooks t))
     (let ((real-start (max 1 (1- start)))
-          (real-end   (min (1+ (buffer-size)) (1+ end)))
+          (real-end (min (1+ (buffer-size)) (1+ end)))
           (any-change nil))
       (save-excursion
         nil))))
+
+(defun potato--user-ref-updated (overlay &rest rest)
+  (delete-overlay overlay))
 
 (defun potato-insert-user ()
   "Select a username to be inserted into the new message."
@@ -227,7 +230,8 @@
           (insert (second element))
           (let ((overlay (make-overlay start (point) nil nil nil)))
             (overlay-put overlay 'face 'potato-message-input-user-name)
-            (overlay-put overlay 'potato-user-ref (first element))))))))
+            (overlay-put overlay 'potato-user-ref (first element))
+            (overlay-put overlay 'modification-hooks '(potato--user-ref-updated))))))))
 
 (defun potato--input (str)
   (let ((url-request-data (encode-coding-string (json-encode `((text . ,str))) 'utf-8)))
