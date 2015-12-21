@@ -73,6 +73,10 @@
   :group 'potato)
 
 (defvar potato--active-buffers nil)
+(defvar potato--connection nil
+  "The current HTTP connection that is waiting for data, or nil if not currently connected to the server.")
+(defvar potato--event-id nil
+  "The event id for the current connection, or nil if client not started")
 
 (defun potato--string-match-start (string key)
   (and (>= (length string) (length key))
@@ -160,8 +164,7 @@
   (let ((text (string-trim (potato--read-input-line potato--input-marker (point-max)))))
     (when (not (equal text ""))
       (delete-region potato--input-marker (point-max))
-      (when potato--input-function
-        (funcall potato--input-function text)))))
+      (potato--input text))))
 
 (defvar potato-channel-mode-map
   (let ((map (make-sparse-keymap)))
@@ -197,7 +200,6 @@
   (setq-local potato--output-marker (make-marker))
   (setq-local potato--input-marker (make-marker))
   (set-marker potato--output-marker (point-max))
-  (setq-local potato--input-function nil)
   (insert "channel> ")
   (add-text-properties (point-at-bol) (point)
                        (list 'read-only t
@@ -288,13 +290,14 @@
   (potato--parse-json-decode-element content))
 
 (defun potato--process-channel-message (message)
-  (let* ((message-id (potato--assoc-with-check 'id message))
-         (timestamp (potato--assoc-with-check 'created_date message))
-         (text (potato--assoc-with-check 'text message))
-         (from (potato--assoc-with-check 'from message))
-         (parsed (potato--parse-json-message text))
-         (user (cl-assoc from potato--users :test #'equal)))
-    (potato--insert-message message-id timestamp (if user (second user) "Unknown") (string-trim parsed))))
+  (with-current-buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message))
+    (let* ((message-id (potato--assoc-with-check 'id message))
+           (timestamp (potato--assoc-with-check 'created_date message))
+           (text (potato--assoc-with-check 'text message))
+           (from (potato--assoc-with-check 'from message))
+           (parsed (potato--parse-json-message text))
+           (user (cl-assoc from potato--users :test #'equal)))
+      (potato--insert-message message-id timestamp (if user (second user) "Unknown") (string-trim parsed)))))
 
 (defun potato--process-channel-type-notification (message)
   (message "typing: %S" message))
@@ -350,23 +353,55 @@
           (t
            (message "Unprocessed message: %S" message)))))
 
-(defun potato--fetch-message (queue buffer)
+(defun potato--add-binding (cid)
+  (unless potato--event-id
+    (error "Client has not been started"))
+  (let ((url (with-output-to-string
+               (princ "/channel-updates/update?event-id=")
+               (princ potato--event-id)
+               (princ "&cmd=add&channel=")
+               (princ cid)
+               (princ "&services=content,state,notifications"))))
+    (potato--url-retrieve url "POST" (lambda (data)
+                                       (let ((result (assoc 'result data)))
+                                         (unless (and result (equal (cdr result) "ok"))
+                                           (message "Unable to connect to channel")))))))
+
+(defun potato--fetch-message (queue)
   (when potato--connection
     (error "Attempt to fetch a new message while a current request is already active"))
-  (with-current-buffer buffer
-    (let ((connection (potato--url-retrieve (format "/channel-updates?channels=%s&format=json&services=content,state,notifications%s"
-                                                    potato--channel-id
-                                                    (if queue (format "&event-id=%s" queue) ""))
+  (let* ((url (with-output-to-string
+                (princ "/channel-updates?channels=")
+                (loop for (cid . buffer) in potato--active-buffers
+                      for first = t then nil
+                      unless first
+                      do (princ ",")
+                      do (princ cid))
+                (princ "&format=json&services=content,state,notifications")
+                (when queue
+                  (princ "&event-id=")
+                  (princ queue)))))
+    (let ((connection (potato--url-retrieve url
                                             "GET"
                                             (lambda (data)
                                               (setq potato--connection nil)
                                               (loop for message across (cdr (assoc 'data data))
                                                     do (potato--process-new-message message))
                                               (let ((queue (cdr (assoc 'event data))))
+                                                (setq potato--event-id queue)
                                                 (unless queue
                                                   (error "No queue in channel update"))
-                                                (potato--fetch-message queue buffer))))))
+                                                (potato--fetch-message queue))))))
       (setq potato--connection connection))))
+
+(defun potato--enable-buffer (buffer)
+  (with-current-buffer buffer
+    (let ((active-buffers potato--active-buffers))
+      (push (cons potato--channel-id buffer) potato--active-buffers)
+      (cond ((null active-buffers)
+             (potato--fetch-message nil))
+            (t
+             (potato--add-binding potato--channel-id))))))
 
 (cl-defun potato--load-history (&key (num-messages 50))
   (potato--url-retrieve (format "/channel/%s/history?format=json&num=%d" potato--channel-id num-messages)
@@ -407,29 +442,28 @@
       (setq-local potato--active-url potato-url)
       (setq-local potato--active-api-token potato-api-token)
       (setq-local potato--users nil)
-      (setq-local potato--connection nil)
       (setq-local potato--pending-user-state nil)
-      (setq potato--input-function 'potato--input)
       (make-local-variable 'potato--connection)
       (potato--request-user-list (lambda (users)
                                    (setq potato--users users)
                                    (potato--load-history)))
-      (potato--fetch-message nil buffer)
+      (potato--enable-buffer buffer)
       (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t))
+    ;; Update the modeline indicator if needed
+    (unless (member 'potato-display-notifications-string global-mode-string)
+      (if global-mode-string
+          (setq global-mode-string (append global-mode-string '(potato-display-notifications-string)))
+        (setq global-mode-string '("" potato-display-notifications-string))))
     buffer))
 
-(defun potato--find-channel-buffer (cid)
+(cl-defun potato--find-channel-buffer (cid &key create-if-missing)
   (let ((e (find cid potato--active-buffers :key #'car :test #'equal)))
-    (if e
-        (cdr e)
-      (let ((buffer (potato--create-buffer (format "*potato-%s*" cid) cid)))
-        (push (cons cid buffer) potato--active-buffers)
-        ;; Update the modeline indicator if needed
-        (unless (member 'potato-display-notifications-string global-mode-string)
-          (if global-mode-string
-              (setq global-mode-string (append global-mode-string '(potato-display-notifications-string)))
-            (setq global-mode-string '("" potato-display-notifications-string))))
-        buffer))))
+    (cond (e
+           (cdr e))
+          (create-if-missing
+           (potato--create-buffer (format "*potato-%s*" cid) cid))
+          (t
+           (error "No buffer for channel %s" cid)))))
 
 (defun potato--request-channel-list ()
   (let ((result (potato--url-retrieve-synchronous "/channels" "GET" :use-global t)))
@@ -479,7 +513,7 @@
 
 (defun potato-client (channel-id)
   (interactive (list (potato--choose-channel-id)))
-  (let ((buffer (potato--find-channel-buffer channel-id)))
+  (let ((buffer (potato--find-channel-buffer channel-id :create-if-missing t)))
     (switch-to-buffer buffer)))
 
 (provide 'potato)
