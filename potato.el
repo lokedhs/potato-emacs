@@ -108,17 +108,12 @@
         (let ((kill-buffer-query-functions nil))
           (kill-buffer (current-buffer)))))))
 
-(cl-defmacro with-url-params ((url-sym url method use-global) &body body)
+(cl-defmacro with-url-params ((url-sym url method) &body body)
   (declare (indent 1))
-  (let ((use-global-sym (gensym "use-global-"))
-        (base-sym (gensym "base-")))
-    `(let* ((,use-global-sym ,use-global)
-            (,base-sym (if ,use-global-sym potato-url potato--active-url)))
+  (let ((base-sym (gensym "base-")))
+    `(let* ((,base-sym potato-url))
        (let ((url-request-method ,method)
-             (url-request-extra-headers (list (cons "API-Token" 
-                                                    (if ,use-global-sym
-                                                        potato-api-token
-                                                      potato--active-api-token))))
+             (url-request-extra-headers (list (cons "API-Token" potato-api-token)))
              (,url-sym (format "%s%sapi/1.0%s"
                                ,base-sym
                                (if (eql (aref ,base-sym (1- (length ,base-sym))) ?/) "" "/")
@@ -127,13 +122,13 @@
 
 (defun potato--url-retrieve (url method callback)
   (let ((buffer (current-buffer)))
-    (with-url-params (result-url url method nil)
+    (with-url-params (result-url url method)
       (url-retrieve result-url (lambda (status)
                                  (potato--url-handler status buffer callback))
                     nil t))))
 
-(cl-defun potato--url-retrieve-synchronous (url method &key use-global)
-  (with-url-params (result-url url method use-global)
+(cl-defun potato--url-retrieve-synchronous (url method)
+  (with-url-params (result-url url method)
     (let ((buffer (url-retrieve-synchronously result-url)))
       (let ((data (with-current-buffer buffer
                     (potato--json-parse-result-buffer))))
@@ -439,8 +434,6 @@
     (with-current-buffer buffer
       (potato-channel-mode)
       (setq-local potato--channel-id cid)
-      (setq-local potato--active-url potato-url)
-      (setq-local potato--active-api-token potato-api-token)
       (setq-local potato--users nil)
       (setq-local potato--pending-user-state nil)
       (make-local-variable 'potato--connection)
@@ -466,7 +459,7 @@
            (error "No buffer for channel %s" cid)))))
 
 (defun potato--request-channel-list ()
-  (let ((result (potato--url-retrieve-synchronous "/channels" "GET" :use-global t)))
+  (let ((result (potato--url-retrieve-synchronous "/channels" "GET")))
     (let ((channels (loop
                      for domain across result
                      for domain-id = (potato--assoc-with-check 'id domain)
