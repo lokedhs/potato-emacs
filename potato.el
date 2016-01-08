@@ -358,13 +358,15 @@
           (t
            (message "Unprocessed message: %S" message)))))
 
-(defun potato--add-binding (cid)
+(defun potato--add-remove-binding (cid add-p)
   (unless potato--event-id
     (error "Client has not been started"))
   (let ((url (with-output-to-string
                (princ "/channel-updates/update?event-id=")
                (princ potato--event-id)
-               (princ "&cmd=add&channel=")
+               (princ "&cmd=")
+               (princ (if add-p "add" "remove"))
+               (princ "&channel=")
                (princ cid)
                (princ "&services=content,state,notifications"))))
     (potato--url-retrieve url "POST" (lambda (data)
@@ -406,7 +408,7 @@
       (cond ((null active-buffers)
              (potato--fetch-message nil))
             (t
-             (potato--add-binding potato--channel-id))))))
+             (potato--add-remove-binding potato--channel-id t))))))
 
 (cl-defun potato--load-history (&key (num-messages 50))
   (potato--url-retrieve (format "/channel/%s/history?format=json&num=%d" potato--channel-id num-messages)
@@ -422,12 +424,18 @@
     (setq global-mode-string (remove 'potato-display-notifications-string global-mode-string)))
   (let ((connection potato--connection))
     (when connection
-      (let ((proc (get-buffer-process connection)))
-        (when proc
-          (message "Stopping outstanding connection")
-          (condition-case condition
-              (kill-process proc)
-            (error (message "Error when closing buffer: %S" condition))))))))
+      (if potato--active-buffers
+          ;; We still have other opened buffers, simply unregister the binding
+          (when nil
+            ;; TODO: Remove isn't supported by the server yet, so let's just keep the binding active
+            (potato--add-remove-binding potato--channel-id nil))
+        ;; ELSE: This was the last buffer, close the connection
+        (let ((proc (get-buffer-process connection)))
+          (when proc
+            (message "Stopping outstanding connection")
+            (condition-case condition
+                (kill-process proc)
+              (error (message "Error when closing buffer: %S" condition)))))))))
 
 (defun potato--request-user-list (callback)
   (potato--url-retrieve (format "/channel/%s/users" potato--channel-id)
@@ -437,7 +445,15 @@
                                    (loop for ch across (potato--assoc-with-check 'members data)
                                          collect (cons (potato--assoc-with-check 'id ch)
                                                        (list (potato--assoc-with-check 'description ch)
+                                                             (potato--assoc-with-check 'nickname ch)
                                                              (potato--assoc-with-check 'image_name ch))))))))
+
+(defun potato--update-userlist (users)
+  (setq potato--users users)
+  (dolist (v potato--pending-user-state)
+    (destructuring-bind (uid new-state) v
+      (potato--update-active-state-for-user-from-id uid new-state)))
+  (setq potato--pending-user-state nil))
 
 (defun potato--create-buffer (name cid)
   (let ((buffer (generate-new-buffer name)))
@@ -448,7 +464,7 @@
       (setq-local potato--pending-user-state nil)
       (make-local-variable 'potato--connection)
       (potato--request-user-list (lambda (users)
-                                   (setq potato--users users)
+                                   (potato--update-userlist users)
                                    (potato--load-history)))
       (potato--enable-buffer buffer)
       (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t))
