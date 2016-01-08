@@ -1,6 +1,7 @@
 ;;; -*- lexical-binding: t -*-
 
 (require 'url)
+(require 'subr-x)
 
 (defgroup potato nil
   "Potato client implementation for Emacs"
@@ -253,9 +254,8 @@
 (defun potato-open-selected-link ()
   "Open the link at the current position."
   (interactive)
-  (let ((url (get-char-property (point) 'potato-link-destination)))
-    (when url
-      (browse-url url))))
+  (when-let ((url (get-char-property (point) 'potato-link-destination)))
+    (browse-url url)))
 
 (defun potato--parse-json-decode-url (element)
   (let ((addr (potato--assoc-with-check 'addr element))
