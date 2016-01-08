@@ -85,24 +85,27 @@
     (cdr value)))
 
 (defun potato--json-parse-result-buffer ()
-  (goto-char (point-min))
-  (search-forward "\n\n")
   (let* ((content (buffer-substring (point) (point-max)))
          (decoded-content (decode-coding-string content 'utf-8)))
     (json-read-from-string decoded-content)))
 
-(defun potato--url-handler (status buffer callback)
+(defun potato--url-handler (status buffer callback as-json-p)
   (let ((error-status (getf status :error)))
     (if error-status
         (progn
           (message "Got error: %S" status)
           (signal (car error-status) (cdr error-status)))
       ;; ELSE: No error
-      (let ((data (potato--json-parse-result-buffer)))
-        (with-current-buffer buffer
-          (funcall callback data))
-        (let ((kill-buffer-query-functions nil))
-          (kill-buffer (current-buffer)))))))
+      (progn
+        (goto-char (point-min))
+        (search-forward "\n\n")
+        (let ((data (if as-json-p
+                        (potato--json-parse-result-buffer)
+                      (buffer-substring (point) (point-max)))))
+          (with-current-buffer buffer
+            (funcall callback data))
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer (current-buffer))))))))
 
 (cl-defmacro with-url-params ((url-sym url method) &body body)
   (declare (indent 1))
@@ -116,17 +119,19 @@
                                ,url)))
          ,@body))))
 
-(defun potato--url-retrieve (url method callback)
+(cl-defun potato--url-retrieve (url method callback &key (as-json-p t))
   (let ((buffer (current-buffer)))
     (with-url-params (result-url url method)
       (url-retrieve result-url (lambda (status)
-                                 (potato--url-handler status buffer callback))
+                                 (potato--url-handler status buffer callback as-json-p))
                     nil t))))
 
 (cl-defun potato--url-retrieve-synchronous (url method)
   (with-url-params (result-url url method)
     (let ((buffer (url-retrieve-synchronously result-url)))
       (let ((data (with-current-buffer buffer
+                    (goto-char (point-min))
+                    (search-forward "\n\n")
                     (potato--json-parse-result-buffer))))
         (let ((kill-buffer-query-functions nil))
           (kill-buffer buffer))
@@ -163,7 +168,7 @@
     (define-key map (kbd "@") 'potato-insert-user)
     map))
 
-(defun potato--insert-message (message-id timestamp from text)
+(defun potato--insert-message (message-id timestamp from text image)
   (save-excursion
     (goto-char potato--output-marker)
     (let ((new-pos (loop with prev-pos = (point)
@@ -176,14 +181,19 @@
                          return prev-pos)))
       (goto-char new-pos)
       (let ((inhibit-read-only t))
-        (insert (propertize (concat (propertize (format "[%s] " from)
-                                                'face 'potato-message-from)
-                                    text
-                                    "\n")
-                            'read-only t
-                            'potato-message-id message-id
-                            'potato-timestamp timestamp
-                            'front-sticky '(read-only)))))))
+        (let ((start (point)))
+          (insert (concat (propertize (format "[%s] " from)
+                                      'face 'potato-message-from)
+                          text
+                          "\n"))
+          (when image
+            (potato--insert-image (potato--assoc-with-check 'file image))
+            (insert "\n"))
+          (add-text-properties start (point)
+                               (list 'read-only t
+                                     'potato-message-id message-id
+                                     'potato-timestamp timestamp
+                                     'front-sticky '(read-only))))))))
 
 (define-derived-mode potato-channel-mode nil "Potato"
   "Mode for Potato channel content"
@@ -200,11 +210,6 @@
                              'field 'output))
   (set-marker-insertion-type potato--output-marker t)
   (set-marker potato--input-marker (point-max)))
-
-(cl-defun debug-insert-message (&optional (time 0))
-  (let ((timestamp (format "20150101T12:00:%02dZ" time))
-        (message-id (format "msgid%d" time)))
-    (potato--insert-message message-id timestamp "Palle" "Hello test message here")))
 
 (defun potato--after-user-change-modification (start end &rest ignore)
   (let ((inhibit-modification-hooks t))
@@ -294,6 +299,32 @@
 (defun potato--parse-json-message (content)
   (potato--parse-json-decode-element content))
 
+(defun potato--insert-image-handler (status overlay data)
+  (let ((image (create-image data nil t))
+        (start (overlay-start overlay))
+        (end (overlay-end overlay)))
+    (delete-overlay overlay)
+    (save-excursion
+      (let ((inhibit-read-only t))
+        (goto-char start)
+        (delete-region start end)
+        (insert-image image "[image]")))))
+
+(cl-defun potato--insert-image (file)
+  (message "Image insertion disabled: %S" file)
+  (return-from potato--insert-image nil)
+  (let ((buffer (current-buffer))
+        (start (point)))
+    (insert "[loading-image]")
+    (let ((overlay (make-overlay start (point))))
+      (url-retrieve url
+                    (lambda (status)
+                      (potato--url-handler status buffer
+                                           (lambda (data)
+                                             (potato--insert-image-handler status overlay data))
+                                           nil))
+                    nil t))))
+
 (defun potato--process-channel-message (message)
   (with-current-buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message))
     (let* ((message-id (potato--assoc-with-check 'id message))
@@ -301,8 +332,10 @@
            (text (potato--assoc-with-check 'text message))
            (from (potato--assoc-with-check 'from message))
            (parsed (potato--parse-json-message text))
-           (user (cl-assoc from potato--users :test #'equal)))
-      (potato--insert-message message-id timestamp (if user (second user) "Unknown") (string-trim parsed)))))
+           (user (cl-assoc from potato--users :test #'equal))
+           (image (let ((image-entry (assoc 'image message)))
+                    (if image-entry (cdr image-entry) nil))))
+      (potato--insert-message message-id timestamp (if user (second user) "Unknown") (string-trim parsed) image))))
 
 (defun potato--process-channel-type-notification (message)
   (message "typing: %S" message))
