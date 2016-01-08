@@ -459,7 +459,7 @@
   (let ((now (float-time)))
     (when (or (null potato--last-typing-notifcation)
               (> now (+ potato--last-typing-notifcation 2)))
-      (let ((url-request-data (encode-coding-string (json-encode `((state . t))) 'utf-8)))
+      (let ((url-request-data (encode-coding-string (json-encode '((state . t))) 'utf-8)))
         (potato--url-retrieve (format "/channel/%s/type" potato--channel-id) "POST"
                               (lambda (data)
                                 (message "Typing result: %S" data))))
