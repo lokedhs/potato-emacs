@@ -67,11 +67,6 @@
   :type 'string
   :group 'potato)
 
-(defcustom potato-channel-id ""
-  "Default channel to connect to"
-  :type 'string
-  :group 'potato)
-
 (defvar potato--active-buffers nil)
 (defvar potato--connection nil
   "The current HTTP connection that is waiting for data, or nil if not currently connected to the server.")
@@ -249,13 +244,28 @@
   (let ((s (potato--parse-json-decode-element text)))
     (propertize s 'font-lock-face face)))
 
+(defvar potato-url-keymap
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-2] 'potato-open-selected-link)
+    (define-key map (kbd "RET") 'potato-open-selected-link)
+    map))
+
+(defun potato-open-selected-link ()
+  "Open the link at the current position."
+  (interactive)
+  (let ((url (get-char-property (point) 'potato-link-destination)))
+    (when url
+      (browse-url url))))
+
 (defun potato--parse-json-decode-url (element)
   (let ((addr (potato--assoc-with-check 'addr element))
         (description (potato--assoc-with-check 'description element)))
     (propertize description
                 'font-lock-face 'link
                 'mouse-face 'highlight
-                'help-echo (format "mouse-2: browse url: %s" addr))))
+                'help-echo (format "mouse-2: browse url: %s" addr)
+                'potato-link-destination addr
+                'keymap potato-url-keymap)))
 
 (defun potato--parse-json-decode-element (element)
   (etypecase element
