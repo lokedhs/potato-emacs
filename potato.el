@@ -455,6 +455,16 @@
       (potato--update-active-state-for-user-from-id uid new-state)))
   (setq potato--pending-user-state nil))
 
+(defun potato--send-typing-notification ()
+  (let ((now (float-time)))
+    (when (or (null potato--last-typing-notifcation)
+              (> now (+ potato--last-typing-notifcation 2)))
+      (let ((url-request-data (encode-coding-string (json-encode `((state . t))) 'utf-8)))
+        (potato--url-retrieve (format "/channel/%s/type" potato--channel-id) "POST"
+                              (lambda (data)
+                                (message "Typing result: %S" data))))
+      (setq potato--last-typing-notifcation now))))
+
 (defun potato--create-buffer (name cid)
   (let ((buffer (generate-new-buffer name)))
     (with-current-buffer buffer
@@ -462,12 +472,14 @@
       (setq-local potato--channel-id cid)
       (setq-local potato--users nil)
       (setq-local potato--pending-user-state nil)
+      (setq-local potato--last-typing-notifcation nil)
       (make-local-variable 'potato--connection)
       (potato--request-user-list (lambda (users)
                                    (potato--update-userlist users)
                                    (potato--load-history)))
       (potato--enable-buffer buffer)
-      (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t))
+      (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t)
+      (add-hook 'post-self-insert-hook 'potato--send-typing-notification t t))
     ;; Update the modeline indicator if needed
     (unless (member 'potato-display-notifications-string global-mode-string)
       (if global-mode-string
