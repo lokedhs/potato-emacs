@@ -462,7 +462,8 @@
       (let ((url-request-data (encode-coding-string (json-encode '((state . t))) 'utf-8)))
         (potato--url-retrieve (format "/channel/%s/type" potato--channel-id) "POST"
                               (lambda (data)
-                                (message "Typing result: %S" data))))
+                                (unless (equal (potato--assoc-with-check 'result data) "ok")
+                                  (message "Error when sending typing notification")))))
       (setq potato--last-typing-notifcation now))))
 
 (defun potato--create-buffer (name cid)
