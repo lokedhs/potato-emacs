@@ -78,11 +78,14 @@
   (and (>= (length string) (length key))
        (string= (subseq string 0 (length key)) key)))
 
-(defun potato--assoc-with-check (tag alist)
+(defun potato--assoc-with-check (tag alist &optional allow-missing)
   (let ((value (assoc tag alist)))
-    (unless value
-      (error "No value for tag: %s" tag))
-    (cdr value)))
+    (cond (value
+           (cdr value))
+          (allow-missing
+           nil)
+          (t
+           (error "No value for tag: %s" tag)))))
 
 (defun potato--json-parse-result-buffer ()
   (let* ((content (buffer-substring (point) (point-max)))
@@ -320,17 +323,38 @@
                               (potato--insert-image-handler overlay data))
                             :as-json-p nil))))
 
-(defun potato--process-channel-message (message)
+(defun potato--find-message-in-log (message-id)
+  (loop with curr = (point-min)
+        for pos = (next-single-property-change curr 'potato-message-id)
+        while pos
+        for value = (get-char-property pos 'potato-message-id)
+        when (equal value message-id)
+        return (list pos (next-single-property-change pos 'potato-message-id))
+        do (setq curr pos)
+        finally (return nil)))
+
+(defun potato--process-channel-message (message loading-history)
   (with-current-buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message))
-    (let* ((message-id (potato--assoc-with-check 'id message))
-           (timestamp (potato--assoc-with-check 'created_date message))
-           (text (potato--assoc-with-check 'text message))
-           (from (potato--assoc-with-check 'from message))
-           (parsed (potato--parse-json-message text))
-           (user (cl-assoc from potato--users :test #'equal))
-           (image (let ((image-entry (assoc 'image message)))
-                    (if image-entry (cdr image-entry) nil))))
-      (potato--insert-message message-id timestamp (if user (second user) "Unknown") (string-trim parsed) image))))
+    (let ((message-id (potato--assoc-with-check 'id message))
+          (updated (potato--assoc-with-check 'updated message t)))
+      (when (or loading-history
+                (not updated)
+                (let ((old-message-pos (potato--find-message-in-log message-id)))
+                  (if old-message-pos
+                      (destructuring-bind (start end) old-message-pos
+                        (let ((inhibit-read-only t))
+                          (delete-region start end))
+                        t)
+                    nil)))
+        (when (not (potato--assoc-with-check 'deleted message t))
+          (let* ((timestamp (potato--assoc-with-check 'created_date message))
+                 (text (potato--assoc-with-check 'text message))
+                 (from (potato--assoc-with-check 'from message))
+                 (parsed (potato--parse-json-message text))
+                 (user (cl-assoc from potato--users :test #'equal))
+                 (image (let ((image-entry (assoc 'image message)))
+                          (if image-entry (cdr image-entry) nil))))
+            (potato--insert-message message-id timestamp (if user (second user) "Unknown") (string-trim parsed) image)))))))
 
 (defun potato--process-channel-type-notification (message)
   (message "typing: %S" message))
@@ -374,7 +398,7 @@
 (defun potato--process-new-message (message)
   (let ((type (potato--assoc-with-check 'type message)))
     (cond ((equal type "m")
-           (potato--process-channel-message (potato--assoc-with-check 'c message)))
+           (potato--process-channel-message (potato--assoc-with-check 'c message) nil))
           ((string= type "type")
            (potato--process-channel-type-notification message))
           ((string= type "cu")
@@ -444,7 +468,7 @@
                         "GET"
                         (lambda (data)
                           (loop for message across (potato--assoc-with-check 'messages data)
-                                do (potato--process-channel-message message)))))
+                                do (potato--process-channel-message message t)))))
 
 (defun potato--buffer-closed ()
   (setq potato--active-buffers (cl-remove (current-buffer) potato--active-buffers :key #'cdr :test #'eq))
