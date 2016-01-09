@@ -299,7 +299,7 @@
 (defun potato--parse-json-message (content)
   (potato--parse-json-decode-element content))
 
-(defun potato--insert-image-handler (status overlay data)
+(defun potato--insert-image-handler (overlay data)
   (let ((image (create-image data nil t))
         (start (overlay-start overlay))
         (end (overlay-end overlay)))
@@ -311,19 +311,14 @@
         (insert-image image "[image]")))))
 
 (cl-defun potato--insert-image (file)
-  (message "Image insertion disabled: %S" file)
-  (return-from potato--insert-image nil)
   (let ((buffer (current-buffer))
         (start (point)))
     (insert "[loading-image]")
     (let ((overlay (make-overlay start (point))))
-      (url-retrieve url
-                    (lambda (status)
-                      (potato--url-handler status buffer
-                                           (lambda (data)
-                                             (potato--insert-image-handler status overlay data))
-                                           nil))
-                    nil t))))
+      (potato--url-retrieve file "GET"
+                            (lambda (data)
+                              (potato--insert-image-handler overlay data))
+                            :as-json-p nil))))
 
 (defun potato--process-channel-message (message)
   (with-current-buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message))
@@ -430,6 +425,7 @@
                                               (let ((queue (cdr (assoc 'event data))))
                                                 (setq potato--event-id queue)
                                                 (unless queue
+                                                  (message "Unexpected result from update: %S" data)
                                                   (error "No queue in channel update"))
                                                 (potato--fetch-message queue))))))
       (setq potato--connection connection))))
