@@ -122,11 +122,12 @@
                                ,url)))
          ,@body))))
 
-(cl-defun potato--url-retrieve (url method callback &key (as-json-p t))
+(cl-defun potato--url-retrieve (url method callback &key (as-json-p t) check-if-shutdown)
   (let ((buffer (current-buffer)))
     (with-url-params (result-url url method)
       (url-retrieve result-url (lambda (status)
-                                 (potato--url-handler status buffer callback as-json-p))
+                                 (unless (and check-if-shutdown potato--shutdown-in-progress)
+                                   (potato--url-handler status buffer callback as-json-p)))
                     nil t))))
 
 (cl-defun potato--url-retrieve-synchronous (url method)
@@ -451,7 +452,10 @@
                                                 (unless queue
                                                   (message "Unexpected result from update: %S" data)
                                                   (error "No queue in channel update"))
-                                                (potato--fetch-message queue))))))
+                                                (potato--fetch-message queue)))
+                                            :check-if-shutdown t)))
+      (with-current-buffer connection
+        (setq-local potato--shutdown-in-progress nil))
       (setq potato--connection connection))))
 
 (defun potato--enable-buffer (buffer)
@@ -485,9 +489,11 @@
         ;; ELSE: This was the last buffer, close the connection
         (let ((proc (get-buffer-process connection)))
           (when proc
-            (message "Stopping outstanding connection")
+            (message "All channel windows closed. Disconnecting from server.")
+            (with-current-buffer connection
+              (setq-local potato--shutdown-in-progress t))
             (condition-case condition
-                (kill-process proc)
+                (delete-process proc)
               (error (message "Error when closing buffer: %S" condition)))))))))
 
 (defun potato--request-user-list (callback)
