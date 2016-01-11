@@ -174,7 +174,10 @@
     (define-key map (kbd "@") 'potato-insert-user)
     map))
 
-(defun potato--insert-message (message-id timestamp from text image extra-html)
+(defun potato--format-date (date)
+  (format-time-string "%a %d %b %Y, %H:%M:%S" (date-to-time date)))
+
+(defun potato--insert-message (message-id timestamp updated-date from text image extra-html)
   (save-excursion
     (goto-char potato--output-marker)
     (let ((new-pos (loop with prev-pos = (point)
@@ -187,9 +190,12 @@
                          return prev-pos)))
       (goto-char new-pos)
       (let ((inhibit-read-only t))
-        (let ((start (point))
-              (date-string (format-time-string "%a %d %b %Y, %H:%M:%S" (date-to-time timestamp))))
-          (insert (concat (propertize (format "[%s] %s\n" from date-string)
+        (let ((start (point)))
+          (insert (concat (propertize (concat (format "[%s] %s" from (potato--format-date timestamp))
+                                              (if updated-date
+                                                  (format " (updated %s)" (potato--format-date updated-date))
+                                                "")
+                                              "\n")
                                       'face 'potato-message-from)
                           text
                           "\n\n"))
@@ -375,8 +381,9 @@
                  (user (cl-assoc from potato--users :test #'equal))
                  (image (let ((image-entry (assoc 'image message)))
                           (if image-entry (cdr image-entry) nil)))
-                 (extra-html (potato--assoc-with-check 'extra_html message t)))
-            (potato--insert-message message-id timestamp
+                 (extra-html (potato--assoc-with-check 'extra_html message t))
+                 (updated-date (potato--assoc-with-check 'updated_date message t)))
+            (potato--insert-message message-id timestamp updated-date
                                     (if user (second user) "Unknown")
                                     (string-trim parsed)
                                     image
