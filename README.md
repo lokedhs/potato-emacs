@@ -2,4 +2,5 @@
 Emacs client for Potato
 
 Before attempting to connect, set the customisable parameters
-`potato-api-token`, `potato-url` and `potato-channel-id`.
+`potato-api-token` and `potato-url`. Start the client using
+`M-x potato-client`.
