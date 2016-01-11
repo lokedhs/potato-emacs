@@ -187,11 +187,12 @@
                          return prev-pos)))
       (goto-char new-pos)
       (let ((inhibit-read-only t))
-        (let ((start (point)))
-          (insert (concat (propertize (format "[%s] " from)
+        (let ((start (point))
+              (date-string (format-time-string "%a %d %b %Y, %H:%M:%S" (date-to-time timestamp))))
+          (insert (concat (propertize (format "[%s] %s\n" from date-string)
                                       'face 'potato-message-from)
                           text
-                          "\n"))
+                          "\n\n"))
           (when image
             (potato--insert-image (potato--assoc-with-check 'file image))
             (insert "\n"))
@@ -309,6 +310,17 @@
 (defun potato--parse-json-message (content)
   (potato--parse-json-decode-element content))
 
+(defun potato--extend-message-text-properties (start end)
+  (let* ((pos (1- start))
+         (message-id (get-text-property pos 'potato-message-id))
+         (timestamp (get-text-property pos 'potato-timestamp)))
+    (unless (and message-id timestamp)
+      (error "No message text properties at position %d" pos))
+    (add-text-properties start end (list 'read-only t
+                                         'potato-message-id message-id
+                                         'potato-timestamp timestamp
+                                         'front-sticky t))))
+
 (defun potato--insert-image-handler (overlay data)
   (let ((image (create-image data nil t))
         (start (overlay-start overlay))
@@ -318,7 +330,9 @@
       (let ((inhibit-read-only t))
         (goto-char start)
         (delete-region start end)
-        (insert-image image "[image]")))))
+        (let ((start (point)))
+          (insert-image image "[image]")
+          (potato--extend-message-text-properties start (point)))))))
 
 (cl-defun potato--insert-image (file)
   (let ((buffer (current-buffer))
