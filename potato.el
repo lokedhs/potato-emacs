@@ -390,7 +390,18 @@
                                     extra-html)))))))
 
 (defun potato--process-channel-type-notification (message)
-  (message "typing: %S" message))
+  (let* ((user (potato--assoc-with-check 'user message))
+         (cid (potato--assoc-with-check 'channel message))
+         (add-type (potato--assoc-with-check 'add-type message))
+         (buffer (potato--find-channel-buffer cid :create-if-missing nil)))
+    (when buffer
+      (with-current-buffer buffer
+        (cond ((equal add-type "begin")
+               (cl-pushnew user potato--current-typing :test #'equal))
+              ((equal add-type "end")
+               (setq potato--current-typing (cl-remove user potato--current-typing :test #'equal)))
+              (t
+               (error "Unexpected typing mode: ~S" add-type)))))))
 
 (defun potato--update-active-state-for-user-from-id (uid new-state)
   (if potato--users
@@ -423,7 +434,7 @@
     (if e
         (incf (cdr e))
       (push (cons cid 1) potato--notifications)))
-  (potato--recompute-notifications-message))
+  (potato--recompute-modeline))
 
 (defun potato--process-typing (message)
   nil)
@@ -565,6 +576,7 @@
       (setq-local potato--users nil)
       (setq-local potato--pending-user-state nil)
       (setq-local potato--last-typing-notifcation nil)
+      (setq-local potato--current-typing nil)
       (make-local-variable 'potato--connection)
       (potato--request-user-list (lambda (users)
                                    (potato--update-userlist users)
@@ -626,12 +638,23 @@
 
 (defvar potato-display-notifications-string "")
 
-(defun potato--recompute-notifications-message ()
+(defun potato--make-separated-string (&rest args)
+  (with-output-to-string
+    (loop with first = t
+          for v in args
+          when v
+          do (progn
+               (unless first
+                 (princ " "))
+               (princ v)
+               (setq first nil)))))
+
+(defun potato--recompute-modeline ()
   (setq potato-display-notifications-string
-        (if potato--notifications
-            (propertize (format "Potato:%d" (reduce #'+ (mapcar #'cdr potato--notifications)))
-                        'face 'potato-notification)
-          ""))
+        (potato--make-separated-string
+         (if potato--notifications
+             (propertize (format "Potato:%d" (reduce #'+ (mapcar #'cdr potato--notifications)))
+                         'face 'potato-notification))))
   (force-mode-line-update t))
 
 (defun potato-client (channel-id)
