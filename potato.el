@@ -2,6 +2,8 @@
 
 (require 'url)
 (require 'subr-x)
+(require 'shr)
+(require 'notifications)
 
 (defgroup potato nil
   "Potato client implementation for Emacs"
@@ -172,7 +174,7 @@
     (define-key map (kbd "@") 'potato-insert-user)
     map))
 
-(defun potato--insert-message (message-id timestamp from text image)
+(defun potato--insert-message (message-id timestamp from text image extra-html)
   (save-excursion
     (goto-char potato--output-marker)
     (let ((new-pos (loop with prev-pos = (point)
@@ -193,6 +195,10 @@
           (when image
             (potato--insert-image (potato--assoc-with-check 'file image))
             (insert "\n"))
+          (when extra-html
+            (let ((extra-html-start (point)))
+              (insert extra-html)
+              (shr-render-region extra-html-start (point))))
           (add-text-properties start (point)
                                (list 'read-only t
                                      'potato-message-id message-id
@@ -354,8 +360,13 @@
                  (parsed (potato--parse-json-message text))
                  (user (cl-assoc from potato--users :test #'equal))
                  (image (let ((image-entry (assoc 'image message)))
-                          (if image-entry (cdr image-entry) nil))))
-            (potato--insert-message message-id timestamp (if user (second user) "Unknown") (string-trim parsed) image)))))))
+                          (if image-entry (cdr image-entry) nil)))
+                 (extra-html (potato--assoc-with-check 'extra_html message t)))
+            (potato--insert-message message-id timestamp
+                                    (if user (second user) "Unknown")
+                                    (string-trim parsed)
+                                    image
+                                    extra-html)))))))
 
 (defun potato--process-channel-type-notification (message)
   (message "typing: %S" message))
