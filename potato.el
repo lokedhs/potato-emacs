@@ -464,7 +464,6 @@
           ((string= type "usernot")
            (potato--process-notification message))
           (t
-           (setq um message)
            (message "Unprocessed message: %S" message)))))
 
 (defun potato--add-remove-binding (cid add-p)
