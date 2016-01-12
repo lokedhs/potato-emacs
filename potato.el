@@ -237,14 +237,6 @@
   (set-marker-insertion-type potato--output-marker t)
   (set-marker potato--input-marker (point-max)))
 
-(defun potato--after-user-change-modification (start end &rest ignore)
-  (let ((inhibit-modification-hooks t))
-    (let ((real-start (max 1 (1- start)))
-          (real-end (min (1+ (buffer-size)) (1+ end)))
-          (any-change nil))
-      (save-excursion
-        nil))))
-
 (defun potato--user-ref-updated (overlay &rest rest)
   (delete-overlay overlay))
 
