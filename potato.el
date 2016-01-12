@@ -164,14 +164,21 @@
                       (princ (buffer-substring p end)))))))
 
 (defun potato-send-input-line ()
+  "Send the currently typed line to the server."
   (interactive)
   (let ((text (string-trim (potato--read-input-line potato--input-marker (point-max)))))
     (when (not (equal text ""))
       (delete-region potato--input-marker (point-max))
       (potato--input text))))
 
+(defun potato-insert-nl ()
+  "Insert a newline into the message."
+  (interactive)
+  (insert "\n"))
+
 (defvar potato-channel-mode-map
   (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "<S-return>") 'potato-insert-nl)
     (define-key map (kbd "RET") 'potato-send-input-line)
     (define-key map (kbd "@") 'potato-insert-user)
     map))
