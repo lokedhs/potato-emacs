@@ -419,14 +419,31 @@
 (defun potato--update-active-state-for-user-from-message (message new-state)
   (potato--update-active-state-for-user-from-id (potato--assoc-with-check 'user message) new-state))
 
+(defun potato--update-active-state-from-sync (message)
+  (let* ((uids (mapcar (lambda (v)
+                         (potato--assoc-with-check 'id v))
+                       (potato--assoc-with-check 'users message)))
+         (unregistered-users (cl-remove-if (lambda (v)
+                                             (cl-member v potato--users :key #'car :test #'equal))
+                                           uids)))
+    (loop for row in potato--users
+          do (setf (fourth row) (if (cl-member (first row) uids :test #'equal) t nil)))
+    (dolist (uid unregistered-users)
+      (potato--update-active-state-for-user-from-id uid t))))
+
 (defun potato--process-channel-update-user (message)
-  (let ((type (potato--assoc-with-check 'add-type message)))
-    (cond ((string= type "add")
-           (potato--update-active-state-for-user-from-message message t))
-          ((string= type "remove")
-           (potato--update-active-state-for-user-from-message message nil))
-          (t
-           (message "Unexpected user update message: %S" message)))))
+  (let ((buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message t))))
+    (when buffer
+      (with-current-buffer buffer
+        (let ((type (potato--assoc-with-check 'add-type message)))
+          (cond ((equal type "add")
+                 (potato--update-active-state-for-user-from-message message t))
+                ((equal type "remove")
+                 (potato--update-active-state-for-user-from-message message nil))
+                ((equal type "sync")
+                 (potato--update-active-state-from-sync message))
+                (t
+                 (message "Unexpected user update message: %S" message))))))))
 
 (defun potato--process-notification (message)
   (let* ((cid (potato--assoc-with-check 'channel message))
@@ -435,9 +452,6 @@
         (incf (cdr e))
       (push (cons cid 1) potato--notifications)))
   (potato--recompute-modeline))
-
-(defun potato--process-typing (message)
-  nil)
 
 (defun potato--process-new-message (message)
   (let ((type (potato--assoc-with-check 'type message)))
@@ -449,9 +463,8 @@
            (potato--process-channel-update-user message))
           ((string= type "usernot")
            (potato--process-notification message))
-          ((string= type "typing")
-           (potato--process-typing message))
           (t
+           (setq um message)
            (message "Unprocessed message: %S" message)))))
 
 (defun potato--add-remove-binding (cid add-p)
