@@ -75,6 +75,8 @@
   "The current HTTP connection that is waiting for data, or nil if not currently connected to the server.")
 (defvar potato--event-id nil
   "The event id for the current connection, or nil if client not started")
+(defvar potato-display-notifications-string "")
+(defvar potato--notifications nil)
 
 (defun potato--string-match-start (string key)
   (and (>= (length string) (length key))
@@ -401,7 +403,8 @@
               ((equal add-type "end")
                (setq potato--current-typing (cl-remove user potato--current-typing :test #'equal)))
               (t
-               (error "Unexpected typing mode: ~S" add-type)))))))
+               (error "Unexpected typing mode: ~S" add-type)))
+        (potato--recompute-channel-modeline)))))
 
 (defun potato--update-active-state-for-user-from-id (uid new-state)
   (if potato--users
@@ -424,8 +427,6 @@
            (potato--update-active-state-for-user-from-message message nil))
           (t
            (message "Unexpected user update message: %S" message)))))
-
-(defvar potato--notifications nil)
 
 (defun potato--process-notification (message)
   (let* ((cid (potato--assoc-with-check 'channel message))
@@ -556,6 +557,12 @@
       (potato--update-active-state-for-user-from-id uid new-state)))
   (setq potato--pending-user-state nil))
 
+(defun potato--name-for-uid (uid)
+  (let ((v (potato--assoc-with-check uid potato--users t)))
+    (if v
+        (car v)
+      uid)))
+
 (defun potato--send-typing-notification ()
   (let ((now (float-time)))
     (when (or (null potato--last-typing-notifcation)
@@ -577,6 +584,8 @@
       (setq-local potato--last-typing-notifcation nil)
       (setq-local potato--current-typing nil)
       (make-local-variable 'potato--connection)
+      (setq-local potato--channel-mode-line "")
+      (setq mode-line-format (append mode-line-format (list 'potato--channel-mode-line)))
       (potato--request-user-list (lambda (users)
                                    (potato--update-userlist users)
                                    (potato--load-history)))
@@ -635,8 +644,6 @@
           (error "Did not find selected channel"))
         (cdr e)))))
 
-(defvar potato-display-notifications-string "")
-
 (defun potato--make-separated-string (&rest args)
   (with-output-to-string
     (loop with first = t
@@ -655,6 +662,19 @@
              (propertize (format "Potato:%d" (reduce #'+ (mapcar #'cdr potato--notifications)))
                          'face 'potato-notification))))
   (force-mode-line-update t))
+
+(defun potato--recompute-channel-modeline ()
+  (setq potato--channel-mode-line
+        (potato--make-separated-string
+         (if potato--current-typing
+             (with-output-to-string
+               (if (null (cdr potato--current-typing))
+                   (princ (format "%s is typing" (potato--name-for-uid (car potato--current-typing))))
+                 (loop for (uid . rest) on potato--current-typing
+                       if rest
+                       do (princ (format "%s, " (potato--name-for-uid uid)))
+                       else
+                       do (princ (format "%s are typing") (potato--name-for-uid uid)))))))))
 
 (defun potato-client (channel-id)
   (interactive (list (potato--choose-channel-id)))
