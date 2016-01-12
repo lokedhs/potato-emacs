@@ -428,7 +428,6 @@
 (defvar potato--notifications nil)
 
 (defun potato--process-notification (message)
-  (setq xx message)
   (let* ((cid (potato--assoc-with-check 'channel message))
          (e (cl-find cid potato--notifications :key #'car :test #'equal)))
     (if e
