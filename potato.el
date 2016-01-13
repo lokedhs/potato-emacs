@@ -537,7 +537,7 @@
                (princ (if add-p "add" "remove"))
                (princ "&channel=")
                (princ cid)
-               (princ "&services=content,state,notifications"))))
+               (princ "&services=content,state,notifications,unread"))))
     (potato--url-retrieve url "POST" (lambda (data)
                                        (let ((result (assoc 'result data)))
                                          (unless (and result (equal (cdr result) "ok"))
