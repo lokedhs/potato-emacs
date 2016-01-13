@@ -77,6 +77,7 @@
   "The event id for the current connection, or nil if client not started")
 (defvar potato-display-notifications-string "")
 (defvar potato--notifications nil)
+(defvar potato--unread-channels nil)
 
 (defun potato--string-match-start (string key)
   (and (>= (length string) (length key))
@@ -452,16 +453,36 @@
       (push (cons cid 1) potato--notifications)))
   (potato--recompute-modeline))
 
+(defun potato--find-unread-channel-data (cid)
+  (cl-find cid potato--unread-channels :key #'car :test #'equal))
+
+(defun potato--process-unread (message)
+  (let* ((cid (potato--assoc-with-check 'channel message))         
+         (e (potato--find-unread-channel-data cid))
+         (n (potato--assoc-with-check 'count message)))
+    (if e
+        (setf (third e) n)
+      (progn
+        (push (list cid "[unknown]" n) potato--unread-channels)
+        (potato--url-retrieve (format "/channel/%s" cid) "GET"
+                              (lambda (data)
+                                (let ((info (potato--find-unread-channel-data cid)))
+                                  (when info
+                                    (let ((channel-name (potato--assoc-with-check 'name data)))
+                                      (setf (second info) channel-name))))))))))
+
 (defun potato--process-new-message (message)
   (let ((type (potato--assoc-with-check 'type message)))
     (cond ((equal type "m")
            (potato--process-channel-message (potato--assoc-with-check 'c message) nil))
-          ((string= type "type")
+          ((equal type "type")
            (potato--process-channel-type-notification message))
-          ((string= type "cu")
+          ((equal type "cu")
            (potato--process-channel-update-user message))
-          ((string= type "usernot")
+          ((equal type "usernot")
            (potato--process-notification message))
+          ((equal type "unread")
+           (potato--process-unread message))
           (t
            (message "Unprocessed message: %S" message)))))
 
@@ -491,7 +512,7 @@
                       unless first
                       do (princ ",")
                       do (princ cid))
-                (princ "&format=json&services=content,state,notifications")
+                (princ "&format=json&services=content,state,notifications,unread")
                 (when queue
                   (princ "&event-id=")
                   (princ queue)))))
@@ -546,6 +567,8 @@
             (message "All channel windows closed. Disconnecting from server.")
             (with-current-buffer connection
               (setq-local potato--shutdown-in-progress t))
+            (setq potato--event-id nil)
+            (setq potato--unread-channels nil)
             (condition-case condition
                 (delete-process proc)
               (error (message "Error when closing buffer: %S" condition)))))))))
