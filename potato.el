@@ -70,6 +70,13 @@
   :type 'string
   :group 'potato)
 
+(defvar potato-channel-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "<S-return>") 'potato-insert-nl)
+    (define-key map (kbd "RET") 'potato-send-input-line)
+    (define-key map (kbd "@") 'potato-insert-user)
+    map))
+
 (defvar potato--active-buffers nil)
 (defvar potato--connection nil
   "The current HTTP connection that is waiting for data, or nil if not currently connected to the server.")
@@ -164,6 +171,11 @@
             finally (when (< p end)
                       (princ (buffer-substring p end)))))))
 
+(defun potato--input (str)
+  (let ((url-request-data (encode-coding-string (json-encode `((text . ,str))) 'utf-8)))
+    (potato--url-retrieve (format "/channel/%s/create" potato--channel-id) "POST"
+                          (lambda (data) nil))))
+
 (defun potato-send-input-line ()
   "Send the currently typed line to the server."
   (interactive)
@@ -177,12 +189,16 @@
   (interactive)
   (insert "\n"))
 
-(defvar potato-channel-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "<S-return>") 'potato-insert-nl)
-    (define-key map (kbd "RET") 'potato-send-input-line)
-    (define-key map (kbd "@") 'potato-insert-user)
-    map))
+(defun potato-switch-to-next-unread ()
+  "Switch to the first channel with unread messages."
+  (interactive)
+  (let ((buffer (loop for channel in (potato--get-all-unread-channels)
+                      for buffer = (potato--find-channel-buffer (first channel) :create-if-missing t)
+                      when (not (eq buffer (current-buffer)))
+                      return buffer)))
+    (if buffer
+        (switch-to-buffer buffer)
+      (message "No channels with unread messages"))))
 
 (defun potato--format-date (date)
   (format-time-string "%a %d %b %Y, %H:%M:%S" (date-to-time date)))
@@ -238,6 +254,10 @@
   (set-marker-insertion-type potato--output-marker t)
   (set-marker potato--input-marker (point-max)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; User input
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun potato--user-ref-updated (overlay &rest rest)
   (delete-overlay overlay))
 
@@ -259,11 +279,6 @@
             (overlay-put overlay 'face 'potato-message-input-user-name)
             (overlay-put overlay 'potato-user-ref (first element))
             (overlay-put overlay 'modification-hooks '(potato--user-ref-updated))))))))
-
-(defun potato--input (str)
-  (let ((url-request-data (encode-coding-string (json-encode `((text . ,str))) 'utf-8)))
-    (potato--url-retrieve (format "/channel/%s/create" potato--channel-id) "POST"
-                          (lambda (data) nil))))
 
 (defun potato--parse-json-decode-span (text face)
   (let ((s (potato--parse-json-decode-element text)))
@@ -389,7 +404,13 @@
                                     (if user (second user) "Unknown")
                                     (string-trim parsed)
                                     image
-                                    extra-html)))))))
+                                    extra-html)
+            (when (and (not loading-history)
+                       (not (get-buffer-window (current-buffer) 'visible)))
+              (let ((old potato--unread-in-channel))
+                (incf potato--unread-in-channel)
+                (when (zerop old)
+                  (potato--recompute-modeline))))))))))
 
 (defun potato--process-channel-type-notification (message)
   (let* ((user (potato--assoc-with-check 'user message))
@@ -453,6 +474,15 @@
       (push (cons cid 1) potato--notifications)))
   (potato--recompute-modeline))
 
+(defun potato--request-channel-info (cid callback)
+  (potato--url-retrieve (format "/channel/%s" cid) "GET"
+                        (lambda (data)
+                          (funcall callback data))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Unread processing
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun potato--find-unread-channel-data (cid)
   (cl-find cid potato--unread-channels :key #'car :test #'equal))
 
@@ -461,30 +491,41 @@
          (e (potato--find-unread-channel-data cid))
          (n (potato--assoc-with-check 'count message)))
     (if e
-        (setf (third e) n)
+        (progn
+          (setf (third e) n)
+          (potato--recompute-modeline))
       (progn
         (push (list cid "[unknown]" n) potato--unread-channels)
-        (potato--url-retrieve (format "/channel/%s" cid) "GET"
-                              (lambda (data)
-                                (let ((info (potato--find-unread-channel-data cid)))
-                                  (when info
-                                    (let ((channel-name (potato--assoc-with-check 'name data)))
-                                      (setf (second info) channel-name))))))))))
+        (potato--request-channel-info cid
+                                      (lambda (data)
+                                        (let ((info (potato--find-unread-channel-data cid)))
+                                          (when info
+                                            (let ((channel-name (potato--assoc-with-check 'name data)))
+                                              (setf (second info) channel-name)
+                                              (potato--recompute-modeline))))))))))
 
-(defun potato--process-new-message (message)
-  (let ((type (potato--assoc-with-check 'type message)))
-    (cond ((equal type "m")
-           (potato--process-channel-message (potato--assoc-with-check 'c message) nil))
-          ((equal type "type")
-           (potato--process-channel-type-notification message))
-          ((equal type "cu")
-           (potato--process-channel-update-user message))
-          ((equal type "usernot")
-           (potato--process-notification message))
-          ((equal type "unread")
-           (potato--process-unread message))
-          (t
-           (message "Unprocessed message: %S" message)))))
+(defun potato--get-all-unread-channels ()
+  (let ((opened-channels (mapcan (lambda (v)
+                                   (destructuring-bind (cid . buffer) v
+                                     (with-current-buffer buffer
+                                       (when (and potato--name (plusp potato--unread-in-channel))
+                                         (list (list cid potato--name))))))
+                                 potato--active-buffers)))
+    (let ((remote (loop for (cid name unread-count) in potato--unread-channels
+                        when (and (plusp unread-count)
+                                  (not (cl-member cid opened-channels :key #'first :test #'equal)))
+                        collect (list cid name))))
+      (append opened-channels remote))))
+
+(defun potato--make-unread-notification-string ()
+  (if-let ((result (potato--get-all-unread-channels)))
+      (with-output-to-string
+        (princ "Unread: ")
+        (loop for channel in result
+              for first = t then nil
+              unless first
+              do (princ "/")
+              do (princ (second channel))))))
 
 (defun potato--add-remove-binding (cid add-p)
   (unless potato--event-id
@@ -501,6 +542,25 @@
                                        (let ((result (assoc 'result data)))
                                          (unless (and result (equal (cdr result) "ok"))
                                            (message "Unable to connect to channel")))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Main event processing
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun potato--process-new-message (message)
+  (let ((type (potato--assoc-with-check 'type message)))
+    (cond ((equal type "m")
+           (potato--process-channel-message (potato--assoc-with-check 'c message) nil))
+          ((equal type "type")
+           (potato--process-channel-type-notification message))
+          ((equal type "cu")
+           (potato--process-channel-update-user message))
+          ((equal type "usernot")
+           (potato--process-notification message))
+          ((equal type "unread")
+           (potato--process-unread message))
+          (t
+           (message "Unprocessed message: %S" message)))))
 
 (defun potato--fetch-message (queue)
   (when potato--connection
@@ -533,6 +593,17 @@
         (setq-local potato--shutdown-in-progress nil))
       (setq potato--connection connection))))
 
+(cl-defun potato--load-history (&key (num-messages 50))
+  (potato--url-retrieve (format "/channel/%s/history?format=json&num=%d" potato--channel-id num-messages)
+                        "GET"
+                        (lambda (data)
+                          (loop for message across (potato--assoc-with-check 'messages data)
+                                do (potato--process-channel-message message t)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Buffer management
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun potato--enable-buffer (buffer)
   (with-current-buffer buffer
     (let ((active-buffers potato--active-buffers))
@@ -541,13 +612,6 @@
              (potato--fetch-message nil))
             (t
              (potato--add-remove-binding potato--channel-id t))))))
-
-(cl-defun potato--load-history (&key (num-messages 50))
-  (potato--url-retrieve (format "/channel/%s/history?format=json&num=%d" potato--channel-id num-messages)
-                        "GET"
-                        (lambda (data)
-                          (loop for message across (potato--assoc-with-check 'messages data)
-                                do (potato--process-channel-message message t)))))
 
 (defun potato--buffer-closed ()
   (setq potato--active-buffers (cl-remove (current-buffer) potato--active-buffers :key #'cdr :test #'eq))
@@ -572,6 +636,50 @@
             (condition-case condition
                 (delete-process proc)
               (error (message "Error when closing buffer: %S" condition)))))))))
+
+(defun potato--create-buffer (name cid)
+  (let ((buffer (generate-new-buffer name)))
+    (with-current-buffer buffer
+      (potato-channel-mode)
+      (setq-local potato--channel-id cid)
+      (setq-local potato--users nil)
+      (setq-local potato--pending-user-state nil)
+      (setq-local potato--last-typing-notifcation nil)
+      (setq-local potato--current-typing nil)
+      (setq-local potato--connection nil)
+      (setq-local potato--channel-mode-line "")
+      (setq-local potato--unread-in-channel 0)
+      (setq-local potato--name nil)
+      (setq mode-line-format (append mode-line-format (list 'potato--channel-mode-line)))
+      (potato--request-channel-info cid
+                                    (lambda (data)
+                                      (setq potato--name (potato--assoc-with-check 'name data))
+                                      (potato--request-user-list (lambda (users)
+                                                                   (potato--update-userlist users)
+                                                                   (potato--load-history)))))
+      (potato--enable-buffer buffer)
+      (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t)
+      (add-hook 'post-self-insert-hook 'potato--send-typing-notification t t))
+    ;; Update the modeline indicator if needed
+    (unless (member 'potato-display-notifications-string global-mode-string)
+      (if global-mode-string
+          (setq global-mode-string (append global-mode-string '(potato-display-notifications-string)))
+        (setq global-mode-string '("" potato-display-notifications-string)))
+      (potato--recompute-modeline))
+    buffer))
+
+(cl-defun potato--find-channel-buffer (cid &key create-if-missing)
+  (let ((e (find cid potato--active-buffers :key #'car :test #'equal)))
+    (cond (e
+           (cdr e))
+          (create-if-missing
+           (potato--create-buffer (format "*potato-%s*" cid) cid))
+          (t
+           (error "No buffer for channel %s" cid)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; User list
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun potato--request-user-list (callback)
   (potato--url-retrieve (format "/channel/%s/users" potato--channel-id)
@@ -607,40 +715,6 @@
                                 (unless (equal (potato--assoc-with-check 'result data) "ok")
                                   (message "Error when sending typing notification")))))
       (setq potato--last-typing-notifcation now))))
-
-(defun potato--create-buffer (name cid)
-  (let ((buffer (generate-new-buffer name)))
-    (with-current-buffer buffer
-      (potato-channel-mode)
-      (setq-local potato--channel-id cid)
-      (setq-local potato--users nil)
-      (setq-local potato--pending-user-state nil)
-      (setq-local potato--last-typing-notifcation nil)
-      (setq-local potato--current-typing nil)
-      (make-local-variable 'potato--connection)
-      (setq-local potato--channel-mode-line "")
-      (setq mode-line-format (append mode-line-format (list 'potato--channel-mode-line)))
-      (potato--request-user-list (lambda (users)
-                                   (potato--update-userlist users)
-                                   (potato--load-history)))
-      (potato--enable-buffer buffer)
-      (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t)
-      (add-hook 'post-self-insert-hook 'potato--send-typing-notification t t))
-    ;; Update the modeline indicator if needed
-    (unless (member 'potato-display-notifications-string global-mode-string)
-      (if global-mode-string
-          (setq global-mode-string (append global-mode-string '(potato-display-notifications-string)))
-        (setq global-mode-string '("" potato-display-notifications-string))))
-    buffer))
-
-(cl-defun potato--find-channel-buffer (cid &key create-if-missing)
-  (let ((e (find cid potato--active-buffers :key #'car :test #'equal)))
-    (cond (e
-           (cdr e))
-          (create-if-missing
-           (potato--create-buffer (format "*potato-%s*" cid) cid))
-          (t
-           (error "No buffer for channel %s" cid)))))
 
 (defun potato--request-channel-list ()
   (let ((result (potato--url-retrieve-synchronous "/channels" "GET")))
@@ -694,7 +768,8 @@
         (potato--make-separated-string
          (if potato--notifications
              (propertize (format "Potato:%d" (reduce #'+ (mapcar #'cdr potato--notifications)))
-                         'face 'potato-notification))))
+                         'face 'potato-notification))
+         (potato--make-unread-notification-string)))
   (force-mode-line-update t))
 
 (defun potato--recompute-channel-modeline ()
@@ -708,7 +783,8 @@
                        if rest
                        do (princ (format "%s, " (potato--name-for-uid uid)))
                        else
-                       do (princ (format "%s are typing") (potato--name-for-uid uid)))))))))
+                       do (princ (format "%s are typing") (potato--name-for-uid uid))))))))
+  (force-mode-line-update))
 
 (defun potato-client (channel-id)
   (interactive (list (potato--choose-channel-id)))
