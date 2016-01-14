@@ -788,6 +788,8 @@
 
 (defun potato-client (channel-id)
   (interactive (list (potato--choose-channel-id)))
+  (unless (and potato-api-token (plusp (length potato-api-token)))
+    (user-error "Set the variable ‘potato-api-token’ before starting the Potato client."))
   (let ((buffer (potato--find-channel-buffer channel-id :create-if-missing t)))
     (switch-to-buffer buffer)))
 
