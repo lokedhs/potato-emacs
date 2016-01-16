@@ -327,6 +327,10 @@
                    (propertize (potato--assoc-with-check 'user_description element) 'font-lock-face 'potato-message-user-name))
                   ((string= type "newline")
                    "\n")
+                  ((string= type "math")
+                   (format "\n  %s\n" (potato--parse-json-decode-element (potato--assoc-with-check 'e element))))
+                  ((string= type "inline-math")
+                   (format "[%s]" (potato--parse-json-decode-element (potato--assoc-with-check 'e element))))
                   (t
                    (format "[unknown-element %s]" type)))))))
 
