@@ -255,6 +255,44 @@
   (set-marker potato--input-marker (point-max)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Image support
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun potato--insert-image-handler (overlay data)
+  (let ((image (create-image data nil t))
+        (start (overlay-start overlay))
+        (end (overlay-end overlay)))
+    (delete-overlay overlay)
+    (save-excursion
+      (let ((inhibit-read-only t))
+        (goto-char start)
+        (delete-region start end)
+        (let ((start (point)))
+          (insert-image image "[image]")
+          (potato--extend-message-text-properties start (point)))))))
+
+(cl-defun potato--insert-image (file)
+  (let ((buffer (current-buffer))
+        (start (point)))
+    (insert "[loading-image]")
+    (let ((overlay (make-overlay start (point))))
+      (potato--url-retrieve file "GET"
+                            (lambda (data)
+                              (potato--insert-image-handler overlay data))
+                            :as-json-p nil))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Maths rendering
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; To render an expression:
+;;;   latex -halt-on-error -output-directory=z foo.tex
+;;;   dvipng -o foo.png -bg transparent -q -T tight -z 9 z/foo.dvi
+
+(defun potato--render-maths-to-image (latex-expression)
+  )
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; User input
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -347,29 +385,6 @@
                                          'potato-message-id message-id
                                          'potato-timestamp timestamp
                                          'front-sticky t))))
-
-(defun potato--insert-image-handler (overlay data)
-  (let ((image (create-image data nil t))
-        (start (overlay-start overlay))
-        (end (overlay-end overlay)))
-    (delete-overlay overlay)
-    (save-excursion
-      (let ((inhibit-read-only t))
-        (goto-char start)
-        (delete-region start end)
-        (let ((start (point)))
-          (insert-image image "[image]")
-          (potato--extend-message-text-properties start (point)))))))
-
-(cl-defun potato--insert-image (file)
-  (let ((buffer (current-buffer))
-        (start (point)))
-    (insert "[loading-image]")
-    (let ((overlay (make-overlay start (point))))
-      (potato--url-retrieve file "GET"
-                            (lambda (data)
-                              (potato--insert-image-handler overlay data))
-                            :as-json-p nil))))
 
 (defun potato--find-message-in-log (message-id)
   (loop with curr = (point-min)
