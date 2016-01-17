@@ -86,6 +86,10 @@
 (defvar potato--notifications nil)
 (defvar potato--unread-channels nil)
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Utility functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun potato--string-match-start (string key)
   (and (>= (length string) (length key))
        (string= (subseq string 0 (length key)) key)))
@@ -98,6 +102,31 @@
            nil)
           (t
            (error "No value for tag: %s" tag)))))
+
+(defun potato--make-random-string (n)
+  (with-output-to-string
+    (loop repeat n
+          do (princ (format "%c" (+ ?a (random (1+ (- ?z ?a)))))))))
+
+(defun potato--make-temp-directory (prefix)
+  (cl-labels ((try-make-dir (name)
+                 (condition-case condition
+                     (progn
+                       (make-directory name)
+                       t)
+                   (error nil))))
+    (loop repeat 25
+          for dirname = (format "%s%s-%s" temporary-file-directory prefix (potato--make-random-string 40))
+          when (try-make-dir dirname)
+          return dirname
+          finally (error "Unable to create temporary directory"))))
+
+(defun potato--format-date (date)
+  (format-time-string "%a %d %b %Y, %H:%M:%S" (date-to-time date)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Network tools
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun potato--json-parse-result-buffer ()
   (let* ((content (buffer-substring (point) (point-max)))
@@ -153,6 +182,10 @@
           (kill-buffer buffer))
         data))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Input processing
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun potato--read-input-line (start end)
   (let ((uid-refs (loop for overlay in (overlays-in start end)
                         for uid = (overlay-get overlay 'potato-user-ref)
@@ -199,9 +232,6 @@
     (if buffer
         (switch-to-buffer buffer)
       (message "No channels with unread messages"))))
-
-(defun potato--format-date (date)
-  (format-time-string "%a %d %b %Y, %H:%M:%S" (date-to-time date)))
 
 (defun potato--insert-message (message-id timestamp updated-date from text image extra-html)
   (save-excursion
@@ -290,7 +320,22 @@
 ;;;   dvipng -o foo.png -bg transparent -q -T tight -z 9 z/foo.dvi
 
 (defun potato--render-maths-to-image (latex-expression)
-  )
+  (let* ((dirname (potato--make-temp-directory "potato-render"))
+         (file-prefix (format "%s/math-formula" dirname)))
+    (with-temp-buffer
+      (insert "\\documentclass[12pt]{article}")
+      (insert "\\pagestyle{empty}")
+      (insert "\\begin{document}")
+      (insert "\\(")
+      (insert latex-expression)
+      (insert "\\)")
+      (insert "\\end{document}")
+      (write-file (format "%s.tex" file-prefix)))
+    (if (not (zerop (shell-command (format "latex -halt-on-error -output-directory=%s %s.tex" dirname file-prefix))))
+        (message "Illegal formula, can't render with LaTeX")
+      (if (not (zerop (shell-command "dvipng -o %s.png -bg transparent -q -T tight -z 9 %s.dvi" file-prefix file-prefix)))
+          (message "Unable to convert formula to png")
+        (format "%s.png" file-prefix)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; User input
