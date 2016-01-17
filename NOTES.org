@@ -1,0 +1,4 @@
+* Maths display in the channel buffer
+
+Possible solution, call out to: https://github.com/mneri/pnglatex if
+the license difference can be settled.
