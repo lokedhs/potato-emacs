@@ -124,6 +124,14 @@
 (defun potato--format-date (date)
   (format-time-string "%a %d %b %Y, %H:%M:%S" (date-to-time date)))
 
+(cl-defmacro potato--with-channel (cid &body body)
+  (declare (indent 1))
+  (let ((buffer-sym (gensym "buffer")))
+    `(let ((,buffer-sym (potato--find-channel-buffer ,cid)))
+       (when ,buffer-sym
+         (with-current-buffer ,buffer-sym
+           ,@body)))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Network tools
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -517,18 +525,16 @@
       (potato--update-active-state-for-user-from-id uid t))))
 
 (defun potato--process-channel-update-user (message)
-  (let ((buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message t))))
-    (when buffer
-      (with-current-buffer buffer
-        (let ((type (potato--assoc-with-check 'add-type message)))
-          (cond ((equal type "add")
-                 (potato--update-active-state-for-user-from-message message t))
-                ((equal type "remove")
-                 (potato--update-active-state-for-user-from-message message nil))
-                ((equal type "sync")
-                 (potato--update-active-state-from-sync message))
-                (t
-                 (message "Unexpected user update message: %S" message))))))))
+  (potato--with-channel (potato--assoc-with-check 'channel message t)
+    (let ((type (potato--assoc-with-check 'add-type message)))
+      (cond ((equal type "add")
+             (potato--update-active-state-for-user-from-message message t))
+            ((equal type "remove")
+             (potato--update-active-state-for-user-from-message message nil))
+            ((equal type "sync")
+             (potato--update-active-state-from-sync message))
+            (t
+             (message "Unexpected user update message: %S" message))))))
 
 (defun potato--process-notification (message)
   (let* ((cid (potato--assoc-with-check 'channel message))
@@ -567,6 +573,15 @@
                                             (let ((channel-name (potato--assoc-with-check 'name data)))
                                               (setf (second info) channel-name)
                                               (potato--recompute-modeline))))))))))
+
+(defun potato--process-channel-change (message)
+  (let ((cid (potato--assoc-with-check 'channel message))
+        (name (potato--assoc-with-check 'name message))
+        (topic (potato--assoc-with-check 'topic message)))
+    (potato--with-channel cid
+      (unless (equal name potato--name)
+        (potato--update-channel-name-in-buffer name))
+      (setq potato--topic topic))))
 
 (defun potato--get-all-unread-channels ()
   (let ((opened-channels (mapcan (lambda (v)
@@ -623,6 +638,8 @@
            (potato--process-notification message))
           ((equal type "unread")
            (potato--process-unread message))
+          ((equal type "channel-change")
+           (potato--process-channel-change message))
           (t
            (message "Unprocessed message: %S" message)))))
 
@@ -636,7 +653,7 @@
                       unless first
                       do (princ ",")
                       do (princ cid))
-                (princ "&format=json&services=content,state,notifications,unread")
+                (princ "&format=json&services=content,state,channel,notifications,unread")
                 (when queue
                   (princ "&event-id=")
                   (princ queue)))))
@@ -719,6 +736,7 @@
       (setq-local potato--channel-mode-line "")
       (setq-local potato--unread-in-channel 0)
       (setq-local potato--name nil)
+      (setq-local potato--topic nil)
       (setq mode-line-format (append mode-line-format (list 'potato--channel-mode-line)))
       (potato--request-channel-info cid
                                     (lambda (data)
