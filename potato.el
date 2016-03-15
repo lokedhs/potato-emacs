@@ -701,6 +701,11 @@
                 (delete-process proc)
               (error (message "Error when closing buffer: %S" condition)))))))))
 
+(defun potato--update-channel-name-in-buffer (name)
+  "Updates the local buffer configration as well as its name to reflect the actual name of the channel."
+  (setq potato--name name)
+  (rename-buffer (format "Potato - %s" name) t))
+
 (defun potato--create-buffer (name cid)
   (let ((buffer (generate-new-buffer name)))
     (with-current-buffer buffer
@@ -717,7 +722,7 @@
       (setq mode-line-format (append mode-line-format (list 'potato--channel-mode-line)))
       (potato--request-channel-info cid
                                     (lambda (data)
-                                      (setq potato--name (potato--assoc-with-check 'name data))
+                                      (potato--update-channel-name-in-buffer (potato--assoc-with-check 'name data))
                                       (potato--request-user-list (lambda (users)
                                                                    (potato--update-userlist users)
                                                                    (potato--load-history)))))
