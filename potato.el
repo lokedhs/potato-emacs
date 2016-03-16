@@ -65,7 +65,7 @@
   :type 'string
   :group 'potato)
 
-(defcustom potato-url "http://potato.dhsdevelopments.com/"
+(defcustom potato-url "https://potato.dhsdevelopments.com/"
   "The main url for the Potato instance"
   :type 'string
   :group 'potato)
