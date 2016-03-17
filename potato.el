@@ -159,7 +159,7 @@
           (let ((kill-buffer-query-functions nil))
             (kill-buffer (current-buffer))))))))
 
-(cl-defmacro with-url-params ((url-sym url method) &body body)
+(cl-defmacro potato--with-url-params ((url-sym url method) &body body)
   (declare (indent 1))
   (let ((base-sym (gensym "base-")))
     `(let* ((,base-sym potato-url))
@@ -173,14 +173,14 @@
 
 (cl-defun potato--url-retrieve (url method callback &key (as-json-p t) check-if-shutdown)
   (let ((buffer (current-buffer)))
-    (with-url-params (result-url url method)
+    (potato--with-url-params (result-url url method)
       (url-retrieve result-url (lambda (status)
                                  (unless (and check-if-shutdown potato--shutdown-in-progress)
                                    (potato--url-handler status buffer callback as-json-p)))
                     nil t))))
 
 (cl-defun potato--url-retrieve-synchronous (url method)
-  (with-url-params (result-url url method)
+  (potato--with-url-params (result-url url method)
     (let ((buffer (url-retrieve-synchronously result-url)))
       (let ((data (with-current-buffer buffer
                     (goto-char (point-min))
