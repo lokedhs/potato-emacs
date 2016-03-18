@@ -368,7 +368,7 @@
           (insert (second element))
           (let ((overlay (make-overlay start (point) nil nil nil)))
             (overlay-put overlay 'face 'potato-message-input-user-name)
-            (overlay-put overlay 'potato-user-ref (first element))
+x            (overlay-put overlay 'potato-user-ref (first element))
             (overlay-put overlay 'modification-hooks '(potato--user-ref-updated))))))))
 
 (defun potato--parse-json-decode-span (text face)
@@ -723,6 +723,14 @@
   (setq potato--name name)
   (rename-buffer (format "Potato - %s" name) t))
 
+(defun potato--window-config-updated ()
+  "Hook function that is locally installed for window-configuration-change-hook in all chanbel buffers."
+  (when (get-buffer-window)
+    (let ((e (cl-find potato--channel-id potato--notifications :key #'car :test #'equal)))
+      (when (and e (plusp (cdr e)))
+        (setf (cdr e) 0)
+        (potato--recompute-modeline)))))
+
 (defun potato--create-buffer (name cid)
   (let ((buffer (generate-new-buffer name)))
     (with-current-buffer buffer
@@ -746,7 +754,8 @@
                                                                    (potato--load-history)))))
       (potato--enable-buffer buffer)
       (add-hook 'kill-buffer-hook 'potato--buffer-closed nil t)
-      (add-hook 'post-self-insert-hook 'potato--send-typing-notification t t))
+      (add-hook 'post-self-insert-hook 'potato--send-typing-notification t t)
+      (add-hook 'window-configuration-change-hook 'potato--window-config-updated nil t))
     ;; Update the modeline indicator if needed
     (unless (member 'potato-display-notifications-string global-mode-string)
       (if global-mode-string
@@ -854,8 +863,10 @@
   (setq potato-display-notifications-string
         (potato--make-separated-string
          (if potato--notifications
-             (propertize (format "Potato:%d" (reduce #'+ (mapcar #'cdr potato--notifications)))
-                         'face 'potato-notification))
+             (let ((n (reduce #'+ (mapcar #'cdr potato--notifications))))
+               (if (plusp n)
+                   (propertize (format "Potato:%d" n)
+                               'face 'potato-notification))))
          (potato--make-unread-notification-string)))
   (force-mode-line-update t))
 
