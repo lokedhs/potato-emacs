@@ -728,6 +728,10 @@ x            (overlay-put overlay 'potato-user-ref (first element))
   (when (get-buffer-window)
     (let ((e (cl-find potato--channel-id potato--notifications :key #'car :test #'equal)))
       (when (and e (plusp (cdr e)))
+        (potato--url-retrieve (format "/channel/%s/clear-notifications" potato--channel-id)
+                              "POST"
+                              (lambda (data)
+                                nil))
         (setf (cdr e) 0)
         (potato--recompute-modeline)))))
 
