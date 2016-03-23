@@ -724,16 +724,24 @@
   (rename-buffer (format "Potato - %s" name) t))
 
 (defun potato--window-config-updated ()
-  "Hook function that is locally installed for window-configuration-change-hook in all chanbel buffers."
-  (when (get-buffer-window)
-    (let ((e (cl-find potato--channel-id potato--notifications :key #'car :test #'equal)))
-      (when (and e (plusp (cdr e)))
-        (potato--url-retrieve (format "/channel/%s/clear-notifications" potato--channel-id)
-                              "POST"
-                              (lambda (data)
-                                nil))
-        (setf (cdr e) 0)
-        (potato--recompute-modeline)))))
+  "Hook function that is locally installed for window-configuration-change-hook in all channel buffers."
+  (let ((recompute nil))
+    (when (get-buffer-window)
+      ;; Clear unread count
+      (when (plusp potato--unread-in-channel)
+        (setq potato--unread-in-channel 0)
+        (setq recompute t))
+      ;; Clear notifications for channel
+      (let ((e (cl-find potato--channel-id potato--notifications :key #'car :test #'equal)))
+        (when (and e (plusp (cdr e)))
+          (potato--url-retrieve (format "/channel/%s/clear-notifications" potato--channel-id)
+                                "POST"
+                                (lambda (data)
+                                  nil))
+          (setf (cdr e) 0)
+          (setq recompute t))))
+    (when recompute
+      (potato--recompute-modeline))))
 
 (defun potato--create-buffer (name cid)
   (let ((buffer (generate-new-buffer name)))
