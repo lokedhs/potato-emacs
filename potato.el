@@ -744,7 +744,6 @@
       (setq-local potato--pending-user-state nil)
       (setq-local potato--last-typing-notifcation nil)
       (setq-local potato--current-typing nil)
-      (setq-local potato--connection nil)
       (setq-local potato--channel-mode-line "")
       (setq-local potato--unread-in-channel 0)
       (setq-local potato--name nil)
