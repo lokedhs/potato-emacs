@@ -368,7 +368,7 @@
           (insert (second element))
           (let ((overlay (make-overlay start (point) nil nil nil)))
             (overlay-put overlay 'face 'potato-message-input-user-name)
-x            (overlay-put overlay 'potato-user-ref (first element))
+            (overlay-put overlay 'potato-user-ref (first element))
             (overlay-put overlay 'modification-hooks '(potato--user-ref-updated))))))))
 
 (defun potato--parse-json-decode-span (text face)
