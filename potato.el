@@ -896,10 +896,17 @@
   (force-mode-line-update))
 
 (defun potato-client (channel-id)
+  "Open a Potato channel for the given CHANNEL-ID."
   (interactive (list (potato--choose-channel-id)))
   (unless (and potato-api-token (plusp (length potato-api-token)))
     (user-error "Set the variable ‘potato-api-token’ before starting the Potato client."))
   (let ((buffer (potato--find-channel-buffer channel-id :create-if-missing t)))
     (switch-to-buffer buffer)))
+
+(defun potato-close-all-sessions ()
+  "Close all active Potato client buffers"
+  (interactive)
+  (loop for (cid . buffer) in potato--active-buffers
+        do (kill-buffer buffer)))
 
 (provide 'potato)
