@@ -743,8 +743,8 @@
     (when recompute
       (potato--recompute-modeline))))
 
-(defun potato--create-buffer (name cid)
-  (let ((buffer (generate-new-buffer name)))
+(defun potato--create-buffer (cid)
+  (let ((buffer (generate-new-buffer (format "*potato-%s*" cid))))
     (with-current-buffer buffer
       (potato-channel-mode)
       (setq-local potato--channel-id cid)
@@ -780,7 +780,7 @@
     (cond (e
            (cdr e))
           (create-if-missing
-           (potato--create-buffer (format "*potato-%s*" cid) cid))
+           (potato--create-buffer cid))
           (t
            (error "No buffer for channel %s" cid)))))
 
