@@ -643,6 +643,15 @@
           (t
            (message "Unprocessed message: %S" message)))))
 
+(defun potato--notify-error ()
+  "Add an error message to the end of all active buffers indictating to the user that the connection failed."
+  (loop for (cid . buffer) in potato--active-buffers
+        do (with-current-buffer buffer
+             (save-excursion
+               (goto-char potato--output-marker)
+               (let ((inhibit-read-only t))
+                 (insert "Server disconnected\n"))))))
+
 (defun potato--fetch-message (queue)
   (when potato--connection
     (error "Attempt to fetch a new message while a current request is already active"))
@@ -661,14 +670,20 @@
                                             "GET"
                                             (lambda (data)
                                               (setq potato--connection nil)
-                                              (loop for message across (cdr (assoc 'data data))
-                                                    do (potato--process-new-message message))
-                                              (let ((queue (cdr (assoc 'event data))))
-                                                (setq potato--event-id queue)
-                                                (unless queue
-                                                  (message "Unexpected result from update: %S" data)
-                                                  (error "No queue in channel update"))
-                                                (potato--fetch-message queue)))
+                                              (let ((error-result (assoc 'result data)))
+                                                (if (and error-result (equal error-result "error"))
+                                                    ;; The event id has expired
+                                                    (potato--notify-error)
+                                                  ;; ELSE: No error
+                                                  (progn
+                                                    (loop for message across (cdr (assoc 'data data))
+                                                          do (potato--process-new-message message))
+                                                    (let ((queue (cdr (assoc 'event data))))
+                                                      (setq potato--event-id queue)
+                                                      (unless queue
+                                                        (message "Unexpected result from update: %S" data)
+                                                        (error "No queue in channel update"))
+                                                      (potato--fetch-message queue))))))
                                             :check-if-shutdown t)))
       (with-current-buffer connection
         (setq-local potato--shutdown-in-progress nil))
