@@ -85,6 +85,7 @@
 (defvar potato-display-notifications-string "")
 (defvar potato--notifications nil)
 (defvar potato--unread-channels nil)
+(defvar potato--session-id nil)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Utility functions
@@ -217,13 +218,32 @@
     (potato--url-retrieve (format "/channel/%s/create" potato--channel-id) "POST"
                           (lambda (data) nil))))
 
+(defun potato--parse-cmd (text)
+  (if (string-match "^/\\([a-zA-Z0-9_-]+\\)\\(?: +\\(.*\\)\\)?$" text)
+      (let ((cmd (match-string 1 text))
+            (args (or (match-string 2 text) "")))
+        (let ((url-request-data (encode-coding-string (json-encode `((channel . ,potato--channel-id)
+                                                                     (session_id . ,potato--session-id)
+                                                                     (command . ,cmd)
+                                                                     (arg . ,args)
+                                                                     (reply . :json-false)))
+                                                      'utf-8)))
+          (potato--url-retrieve "/command" "POST"
+                                (lambda (data)
+                                  (let ((result (assoc 'result data)))
+                                    (unless (and result (equal (cdr result) "ok"))
+                                      (message "Error when sending command: %s" result)))))))
+    (user-error "Illegal command format")))
+
 (defun potato-send-input-line ()
   "Send the currently typed line to the server."
   (interactive)
   (let ((text (string-trim (potato--read-input-line potato--input-marker (point-max)))))
     (when (not (equal text ""))
       (delete-region potato--input-marker (point-max))
-      (potato--input text))))
+      (if (eql (aref text 0) ?/)
+          (potato--parse-cmd text)
+        (potato--input text)))))
 
 (defun potato-insert-nl ()
   "Insert a newline into the message."
@@ -663,31 +683,33 @@
                       do (princ ",")
                       do (princ cid))
                 (princ "&format=json&services=content,state,channel,notifications,unread")
+                (princ "&session_id=")
+                (princ potato--session-id)
                 (when queue
                   (princ "&event-id=")
-                  (princ queue)))))
-    (let ((connection (potato--url-retrieve url
-                                            "GET"
-                                            (lambda (data)
-                                              (setq potato--connection nil)
-                                              (let ((error-result (assoc 'result data)))
-                                                (if (and error-result (equal error-result "error"))
-                                                    ;; The event id has expired
-                                                    (potato--notify-error)
-                                                  ;; ELSE: No error
-                                                  (progn
-                                                    (loop for message across (cdr (assoc 'data data))
-                                                          do (potato--process-new-message message))
-                                                    (let ((queue (cdr (assoc 'event data))))
-                                                      (setq potato--event-id queue)
-                                                      (unless queue
-                                                        (message "Unexpected result from update: %S" data)
-                                                        (error "No queue in channel update"))
-                                                      (potato--fetch-message queue))))))
-                                            :check-if-shutdown t)))
-      (with-current-buffer connection
-        (setq-local potato--shutdown-in-progress nil))
-      (setq potato--connection connection))))
+                  (princ queue))))
+         (connection (potato--url-retrieve url
+                                           "GET"
+                                           (lambda (data)
+                                             (setq potato--connection nil)
+                                             (let ((error-result (assoc 'result data)))
+                                               (if (and error-result (equal error-result "error"))
+                                                   ;; The event id has expired
+                                                   (potato--notify-error)
+                                                 ;; ELSE: No error
+                                                 (progn
+                                                   (loop for message across (cdr (assoc 'data data))
+                                                         do (potato--process-new-message message))
+                                                   (let ((queue (cdr (assoc 'event data))))
+                                                     (setq potato--event-id queue)
+                                                     (unless queue
+                                                       (message "Unexpected result from update: %S" data)
+                                                       (error "No queue in channel update"))
+                                                     (potato--fetch-message queue))))))
+                                           :check-if-shutdown t)))
+    (with-current-buffer connection
+      (setq-local potato--shutdown-in-progress nil))
+    (setq potato--connection connection)))
 
 (cl-defun potato--load-history (&key (num-messages 50))
   (potato--url-retrieve (format "/channel/%s/history?format=json&num=%d" potato--channel-id num-messages)
@@ -705,6 +727,7 @@
     (let ((active-buffers potato--active-buffers))
       (push (cons potato--channel-id buffer) potato--active-buffers)
       (cond ((null active-buffers)
+             (setq potato--session-id (potato--make-random-string 40))
              (potato--fetch-message nil))
             (t
              (potato--add-remove-binding potato--channel-id t))))))
