@@ -642,6 +642,9 @@
                                          (unless (and result (equal (cdr result) "ok"))
                                            (message "Unable to connect to channel")))))))
 
+(defun potato--process-unknown-slashcommand (message)
+  (message "Illegal command: %s" (potato--assoc-with-check 'cmd message)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Main event processing
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -660,6 +663,8 @@
            (potato--process-unread message))
           ((equal type "channel-change")
            (potato--process-channel-change message))
+          ((equal type "unknown-slashcommand")
+           (potato--process-unknown-slashcommand message))
           (t
            (message "Unprocessed message: %S" message)))))
 
@@ -682,7 +687,7 @@
                       unless first
                       do (princ ",")
                       do (princ cid))
-                (princ "&format=json&services=content,state,channel,notifications,unread")
+                (princ "&format=json&services=content,state,channel,notifications,unread,session")
                 (princ "&session_id=")
                 (princ potato--session-id)
                 (when queue
