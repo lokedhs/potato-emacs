@@ -759,7 +759,8 @@
             (setq potato--unread-channels nil)
             (condition-case condition
                 (delete-process proc)
-              (error (message "Error when closing buffer: %S" condition)))))))))
+              (error (message "Error when closing buffer: %S" condition))))
+          (setq potato--connection nil))))))
 
 (defun potato--update-channel-name-in-buffer (name)
   "Updates the local buffer configration as well as its name to reflect the actual name of the channel."
