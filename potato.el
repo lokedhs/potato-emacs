@@ -936,7 +936,7 @@
                        if rest
                        do (princ (format "%s, " (potato--name-for-uid uid)))
                        else
-                       do (princ (format "%s are typing") (potato--name-for-uid uid))))))))
+                       do (princ (format "%s are typing" (potato--name-for-uid uid)))))))))
   (force-mode-line-update))
 
 (defun potato-client (channel-id)
