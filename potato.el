@@ -70,6 +70,11 @@
   :type 'string
   :group 'potato)
 
+(defcustom potato-decode-math nil
+  "If true, call LaTeX to render maths expressions."
+  :type 'boolean
+  :group 'potato)
+
 (defvar potato-channel-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "<S-return>") 'potato-insert-nl)
@@ -329,12 +334,12 @@
           (insert-image image "[image]")
           (potato--extend-message-text-properties start (point)))))))
 
-(cl-defun potato--insert-image (file)
+(cl-defun potato--insert-image (url)
   (let ((buffer (current-buffer))
         (start (point)))
     (insert "[loading-image]")
     (let ((overlay (make-overlay start (point))))
-      (potato--url-retrieve file "GET"
+      (potato--url-retrieve url "GET"
                             (lambda (data)
                               (potato--insert-image-handler overlay data))
                             :as-json-p nil))))
@@ -347,8 +352,15 @@
 ;;;   latex -halt-on-error -output-directory=z foo.tex
 ;;;   dvipng -o foo.png -bg transparent -q -T tight -z 9 z/foo.dvi
 
+(defvar potato--latex-tempdir nil)
+
+(defun potato--find-latex-tempdir ()
+  (unless potato--latex-tempdir
+    (setq potato--latex-tempdir (potato--make-temp-directory "potato-render")))
+  potato--latex-tempdir)
+
 (defun potato--render-maths-to-image (latex-expression)
-  (let* ((dirname (potato--make-temp-directory "potato-render"))
+  (let* ((dirname (potato--find-latex-tempdir))
          (file-prefix (format "%s/math-formula" dirname)))
     (with-temp-buffer
       (insert "\\documentclass[12pt]{article}")
@@ -359,9 +371,9 @@
       (insert "\\)")
       (insert "\\end{document}")
       (write-file (format "%s.tex" file-prefix)))
-    (if (not (zerop (shell-command (format "latex -halt-on-error -output-directory=%s %s.tex" dirname file-prefix))))
+    (if (not (zerop (shell-command (format "latex -halt-on-error -interaction batchmode -output-directory=%s %s.tex" dirname file-prefix))))
         (message "Illegal formula, can't render with LaTeX")
-      (if (not (zerop (shell-command "dvipng -o %s.png -bg transparent -q -T tight -z 9 %s.dvi" file-prefix file-prefix)))
+      (if (not (zerop (shell-command (format "dvipng -o %s.png -bg transparent -q -T tight -z 9 %s.dvi" file-prefix file-prefix))))
           (message "Unable to convert formula to png")
         (format "%s.png" file-prefix)))))
 
@@ -417,6 +429,21 @@
                 'potato-link-destination addr
                 'keymap potato-url-keymap)))
 
+(defun potato--insert-maths-formula (element)
+  (let* ((formula (potato--parse-json-decode-element (potato--assoc-with-check 'e element)))
+         (formula-plain (format "[%s]" formula)))
+    (setq foo-x element)
+    (if potato-decode-math
+        (let* ((file (potato--render-maths-to-image formula))
+               (data (with-temp-buffer
+                       (insert-file-contents file)
+                       (buffer-string)))
+               (image (create-image data nil t)))
+          (propertize formula-plain
+                      'display image
+                      'rear-nonsticky '(display)))
+      formula-plain)))
+
 (defun potato--parse-json-decode-element (element)
   (etypecase element
     (string element)
@@ -441,7 +468,7 @@
                   ((string= type "math")
                    (format "\n  %s\n" (potato--parse-json-decode-element (potato--assoc-with-check 'e element))))
                   ((string= type "inline-math")
-                   (format "[%s]" (potato--parse-json-decode-element (potato--assoc-with-check 'e element))))
+                   (potato--insert-maths-formula element))
                   (t
                    (format "[unknown-element %s]" type)))))))
 
