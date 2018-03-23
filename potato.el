@@ -177,11 +177,12 @@
                                ,url)))
          ,@body))))
 
-(cl-defun potato--url-retrieve (url method callback &key (as-json-p t) check-if-shutdown)
+(cl-defun potato--url-retrieve (url method callback &key (as-json-p t) check-if-shutdown ignore-response)
   (let ((buffer (current-buffer)))
     (potato--with-url-params (result-url url method)
       (url-retrieve result-url (lambda (status)
-                                 (unless (and check-if-shutdown potato--shutdown-in-progress)
+                                 (unless (or (and check-if-shutdown potato--shutdown-in-progress)
+                                             ignore-response)
                                    (potato--url-handler status buffer callback as-json-p)))
                     nil t))))
 
@@ -371,8 +372,10 @@
       (insert "\\)")
       (insert "\\end{document}")
       (write-file (format "%s.tex" file-prefix)))
-    (if (not (zerop (shell-command (format "latex -halt-on-error -interaction batchmode -output-directory=%s %s.tex" dirname file-prefix))))
-        (message "Illegal formula, can't render with LaTeX")
+    (if (not (zerop (shell-command (format "latex -halt-on-error -no-shell-escape -interaction batchmode -output-directory=%s %s.tex" dirname file-prefix))))
+        (progn
+          (message "Illegal formula, can't render with LaTeX")
+          nil)
       (if (not (zerop (shell-command (format "dvipng -o %s.png -bg transparent -q -T tight -z 9 %s.dvi" file-prefix file-prefix))))
           (message "Unable to convert formula to png")
         (format "%s.png" file-prefix)))))
@@ -434,14 +437,17 @@
          (formula-plain (format "[%s]" formula)))
     (setq foo-x element)
     (if potato-decode-math
-        (let* ((file (potato--render-maths-to-image formula))
-               (data (with-temp-buffer
-                       (insert-file-contents file)
-                       (buffer-string)))
-               (image (create-image data nil t)))
-          (propertize formula-plain
-                      'display image
-                      'rear-nonsticky '(display)))
+        (let ((file (potato--render-maths-to-image formula)))
+          (if file
+              (let* ((data (with-temp-buffer
+                             (set-buffer-multibyte nil)
+                             (insert-file-contents file)
+                             (buffer-string)))
+                     (image (create-image data nil t)))
+                (propertize formula-plain
+                            'display image
+                            'rear-nonsticky '(display)))
+            formula-plain))
       formula-plain)))
 
 (defun potato--parse-json-decode-element (element)
@@ -497,6 +503,7 @@
         finally (return nil)))
 
 (defun potato--process-channel-message (message loading-history)
+  (message "Incoming message: %S" message)
   (with-current-buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message))
     (let ((message-id (potato--assoc-with-check 'id message))
           (updated (potato--assoc-with-check 'updated message t)))
@@ -653,14 +660,13 @@
               do (princ "/")
               do (princ (second channel))))))
 
-(defun potato--add-remove-binding (cid add-p)
+(defun potato--add-binding (cid)
   (unless potato--event-id
     (error "Client has not been started"))
   (let ((url (with-output-to-string
                (princ "/channel-updates/update?event-id=")
                (princ potato--event-id)
-               (princ "&cmd=")
-               (princ (if add-p "add" "remove"))
+               (princ "&cmd=add")
                (princ "&channel=")
                (princ cid)
                (princ "&services=content,state,notifications,unread"))))
@@ -668,6 +674,20 @@
                                        (let ((result (assoc 'result data)))
                                          (unless (and result (equal (cdr result) "ok"))
                                            (message "Unable to connect to channel")))))))
+
+(defun potato--remove-binding (cid)
+  (unless potato--event-id
+    (error "Client has not been started"))
+  (let ((url (with-output-to-string
+               (princ "/channel-updates/update?event-id=")
+               (princ potato--event-id)
+               (princ "&cmd=add")
+               (princ "&channel=")
+               (princ cid)
+               (princ "&services=content,state,notifications,unread"))))
+    (potato--url-retrieve url "POST" (lambda (data)
+                                       (message "Got response from remove: %S" data))
+                          :ignore-response t)))
 
 (defun potato--process-unknown-slashcommand (message)
   (message "Illegal command: %s" (potato--assoc-with-check 'cmd message)))
@@ -762,7 +782,7 @@
              (setq potato--session-id (potato--make-random-string 40))
              (potato--fetch-message nil))
             (t
-             (potato--add-remove-binding potato--channel-id t))))))
+             (potato--add-binding potato--channel-id))))))
 
 (defun potato--buffer-closed ()
   (setq potato--active-buffers (cl-remove (current-buffer) potato--active-buffers :key #'cdr :test #'eq))
@@ -773,9 +793,7 @@
     (when connection
       (if potato--active-buffers
           ;; We still have other opened buffers, simply unregister the binding
-          (when nil
-            ;; TODO: Remove isn't supported by the server yet, so let's just keep the binding active
-            (potato--add-remove-binding potato--channel-id nil))
+          (potato--remove-binding potato--channel-id)
         ;; ELSE: This was the last buffer, close the connection
         (let ((proc (get-buffer-process connection)))
           (when proc
