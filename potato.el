@@ -503,7 +503,6 @@
         finally (return nil)))
 
 (defun potato--process-channel-message (message loading-history)
-  (message "Incoming message: %S" message)
   (with-current-buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message))
     (let ((message-id (potato--assoc-with-check 'id message))
           (updated (potato--assoc-with-check 'updated message t)))
