@@ -80,6 +80,7 @@
     (define-key map (kbd "<S-return>") 'potato-insert-nl)
     (define-key map (kbd "RET") 'potato-send-input-line)
     (define-key map (kbd "@") 'potato-insert-user)
+    (define-key map (kbd "C-c C-d") 'potato-delete-message)
     map))
 
 (defvar potato--active-buffers nil)
@@ -381,6 +382,20 @@
         (format "%s.png" file-prefix)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Edit/delete messages
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun potato-delete-message ()
+  (interactive)
+  (when (yes-or-no-p "Really delete message? ")
+    (let ((msgid (potato--find-message-at-point (point))))
+      (potato--url-retrieve (format "/message/%s" msgid)
+                            "DELETE"
+                            (lambda (data)
+                              (setq presult data)
+                              (message "Message deleted"))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; User input
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -501,6 +516,12 @@
         return (list pos (next-single-property-change pos 'potato-message-id))
         do (setq curr pos)
         finally (return nil)))
+
+(defun potato--find-message-at-point (point)
+  (let ((msgid (get-text-property point 'potato-message-id)))
+    (unless msgid
+      (error "No message at point"))
+    msgid))
 
 (defun potato--process-channel-message (message loading-history)
   (with-current-buffer (potato--find-channel-buffer (potato--assoc-with-check 'channel message))
