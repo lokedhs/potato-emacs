@@ -92,6 +92,7 @@
 (defvar potato--notifications nil)
 (defvar potato--unread-channels nil)
 (defvar potato--session-id nil)
+(defvar potato-notification-hook (list 'potato--display-notification))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Utility functions
@@ -610,18 +611,61 @@
             (t
              (message "Unexpected user update message: %S" message))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Notifications
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun potato--process-notification (message)
   (let* ((cid (potato--assoc-with-check 'channel message))
          (e (cl-find cid potato--notifications :key #'car :test #'equal)))
     (if e
         (incf (cdr e))
       (push (cons cid 1) potato--notifications)))
-  (potato--recompute-modeline))
+  (potato--recompute-modeline)
+  (run-hook-with-args 'potato-notification-hook message))
 
 (defun potato--request-channel-info (cid callback)
   (potato--url-retrieve (format "/channel/%s" cid) "GET"
                         (lambda (data)
                           (funcall callback data))))
+
+(defun potato--parse-markup (s)
+  "Perform simple markup parsing of a message."
+  (with-output-to-string
+    (let ((start 0))
+      (loop with start = 0
+            for pos = (string-match "\U000f0001user:[^:\U000f0001]+:\\([^\U000f0001]*\\)\U000f0001" s start)
+            while pos
+            do (message (format "Match at %S: %S (whole: %S)" pos (match-string 1 s) (match-string 0 s)))
+            do (progn
+                 (when (< start pos)
+                   (princ (subseq s start pos)))
+                 (princ (match-string 1 s))
+                 (setq start (+ pos (length (match-string 0 s)))))
+            finally (when (< start (length s))
+                      (princ (subseq s start)))))))
+
+(defun potato--display-notification (message)
+  (push message foo-n)
+  (let* ((type (potato--assoc-with-check 'notification_type message))
+         (title (cond
+                 ((equal type "MENTION")
+                  (format "%s mentioned you in channel %s"
+                          (potato--assoc-with-check 'user_description message)
+                          ;; TODO: Update this with the channel name once the server has been updated
+                          (potato--assoc-with-check 'channel message)))
+                 ((equal type "PRIVATE")
+                  (format "Private message from %s"
+                          (potato--assoc-with-check 'user_description message)))
+                 ((equal type "WORD")
+                  (format "Keyword mentioned from %s"
+                          (potato--assoc-with-check 'user_description message)))
+                 (t
+                  (format "Notification in channel from %s"
+                          (potato--assoc-with-check 'user_description message))))))
+    (notifications-notify :app-name "Potato Emacs"
+                          :title title
+                          :body (potato--parse-markup (potato--assoc-with-check 'text message)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Unread processing
