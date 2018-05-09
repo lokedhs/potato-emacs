@@ -92,6 +92,7 @@
 (defvar potato--notifications nil)
 (defvar potato--unread-channels nil)
 (defvar potato--session-id nil)
+(defvar potato--channels nil)
 (defvar potato-notification-hook (list 'potato--display-notification))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -653,7 +654,7 @@
                   (format "%s mentioned you in channel %s"
                           (potato--assoc-with-check 'user_description message)
                           ;; TODO: Update this with the channel name once the server has been updated
-                          (potato--assoc-with-check 'channel message)))
+                          (potato--name-for-channel (potato--assoc-with-check 'channel message))))
                  ((equal type "PRIVATE")
                   (format "Private message from %s"
                           (potato--assoc-with-check 'user_description message)))
@@ -976,25 +977,41 @@
                                   (message "Error when sending typing notification")))))
       (setq potato--last-typing-notifcation now))))
 
-(defun potato--request-channel-list ()
-  (let ((result (potato--url-retrieve-synchronous "/channels" "GET")))
-    (let ((channels (loop
-                     for domain across result
-                     for domain-id = (potato--assoc-with-check 'id domain)
-                     for domain-name = (potato--assoc-with-check 'name domain)
-                     append (loop
-                             for group across (potato--assoc-with-check 'groups domain)
-                             for group-id = (potato--assoc-with-check 'id group)
-                             for group-name = (potato--assoc-with-check 'name group)
-                             append (loop
-                                     for channel across (potato--assoc-with-check 'channels group)
-                                     for channel-id = (potato--assoc-with-check 'id channel)
-                                     for channel-name = (potato--assoc-with-check 'name channel)
-                                     collect (list channel-id domain-name group-name channel-name))))))
-      channels)))
+(defun potato--parse-channel-list (data)
+  (loop
+   for domain across data
+   for domain-id = (potato--assoc-with-check 'id domain)
+   for domain-name = (potato--assoc-with-check 'name domain)
+   append (loop
+           for group across (potato--assoc-with-check 'groups domain)
+           for group-id = (potato--assoc-with-check 'id group)
+           for group-name = (potato--assoc-with-check 'name group)
+           append (loop
+                   for channel across (potato--assoc-with-check 'channels group)
+                   for channel-id = (potato--assoc-with-check 'id channel)
+                   for channel-name = (potato--assoc-with-check 'name channel)
+                   for channel-private = (not (eq (potato--assoc-with-check 'private channel) :json-false))
+                   collect (list channel-id domain-name group-name channel-name channel-private)))))
+
+(defun potato--request-channel-list (callback)
+  (potato--url-retrieve "/channels" "GET"
+                        (lambda (data)
+                          (funcall callback (potato--parse-channel-list data)))))
+
+(defun potato--request-channel-list-sync ()
+  (let* ((result (potato--url-retrieve-synchronous "/channels" "GET"))
+         (channels (potato--parse-channel-list result)))
+    (setq potato--channels channels)
+    channels))
+
+(defun potato--name-for-channel (cid)
+  (let ((res (cl-find cid potato--channels :key #'car :test #'equal)))
+    (if res
+        (fourth res)
+      cid)))
 
 (defun potato--choose-channel-id ()
-  (let* ((channels (coerce (potato--request-channel-list) 'vector))
+  (let* ((channels (coerce (potato--request-channel-list-sync) 'vector))
          (names-list (loop for i from 0 below (length channels)
                            for chan = (aref channels i)
                            for channel-name = (fourth chan)
