@@ -647,7 +647,6 @@
                       (princ (subseq s start)))))))
 
 (defun potato--display-notification (message)
-  (push message foo-n)
   (let* ((type (potato--assoc-with-check 'notification_type message))
          (title (cond
                  ((equal type "MENTION")
