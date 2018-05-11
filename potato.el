@@ -664,7 +664,6 @@
       (loop with start = 0
             for pos = (string-match "\U000f0001user:[^:\U000f0001]+:\\([^\U000f0001]*\\)\U000f0001" s start)
             while pos
-            do (message (format "Match at %S: %S (whole: %S)" pos (match-string 1 s) (match-string 0 s)))
             do (progn
                  (when (< start pos)
                    (princ (subseq s start pos)))
