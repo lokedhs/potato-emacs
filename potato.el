@@ -270,7 +270,23 @@
         (switch-to-buffer buffer)
       (message "No channels with unread messages"))))
 
-(defun potato--insert-message (message-id timestamp updated-date from text image extra-html)
+(defun potato--format-size (size)
+  (let* ((size-k 1024.0)
+         (size-m (* size-k 1024.0))
+         (size-g (* size-m 1024.0))
+         (size-t (* size-g 1024.0)))
+    (cond ((< size 1024)
+           (format "%d bytes" size))
+          ((< size size-m)
+           (format "%d kB" (/ size size-k)))
+          ((< size size-g)
+           (format "%.2f MB" (/ size size-m)))
+          ((< size size-t)
+           (format "%.2f GB" (/ size size-g)))
+          (t
+           (format "%.2f TB" (/ size size-t))))))
+
+(defun potato--insert-message (message-id timestamp updated-date from text image extra-html files)
   (save-excursion
     (goto-char potato--output-marker)
     (let ((new-pos (loop with prev-pos = (point)
@@ -284,14 +300,14 @@
       (goto-char new-pos)
       (let ((inhibit-read-only t))
         (let ((start (point)))
-          (insert (concat (propertize (concat (format "[%s] %s" from (potato--format-date timestamp))
-                                              (if updated-date
-                                                  (format " (updated %s)" (potato--format-date updated-date))
-                                                "")
-                                              "\n")
-                                      'face 'potato-message-from)
-                          text
-                          "\n\n"))
+          (insert (propertize (concat (format "[%s] %s" from (potato--format-date timestamp))
+                                      (if updated-date
+                                          (format " (updated %s)" (potato--format-date updated-date))
+                                        "")
+                                      "\n")
+                              'face 'potato-message-from))
+          (when (> (length text) 0)
+            (insert (concat text "\n\n")))
           (when image
             (potato--insert-image (potato--assoc-with-check 'file image))
             (insert "\n"))
@@ -299,6 +315,15 @@
             (let ((extra-html-start (point)))
               (insert extra-html)
               (shr-render-region extra-html-start (point))))
+          (when files
+            (insert "Files: ")
+            (loop for file across files
+                  for first = t then nil
+                  unless first do (insert ", ")
+                  do (insert (format "%s (%s)"
+                                     (potato--assoc-with-check 'name file)
+                                     (potato--format-size (potato--assoc-with-check 'size file)))))
+            (insert "\n\n"))
           (add-text-properties start (point)
                                (list 'read-only t
                                      'potato-message-id message-id
@@ -547,12 +572,14 @@
                  (image (let ((image-entry (assoc 'image message)))
                           (if image-entry (cdr image-entry) nil)))
                  (extra-html (potato--assoc-with-check 'extra_html message t))
-                 (updated-date (potato--assoc-with-check 'updated_date message t)))
+                 (updated-date (potato--assoc-with-check 'updated_date message t))
+                 (files (potato--assoc-with-check 'files message t)))
             (potato--insert-message message-id timestamp updated-date
                                     (if user (second user) "Unknown")
                                     (string-trim parsed)
                                     image
-                                    extra-html)
+                                    extra-html
+                                    files)
             (when (and (not loading-history)
                        (not (get-buffer-window (current-buffer) 'visible)))
               (let ((old potato--unread-in-channel))
