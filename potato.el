@@ -286,7 +286,24 @@
           (t
            (format "%.2f TB" (/ size size-t))))))
 
-(defun potato--insert-message (message-id timestamp updated-date from text image extra-html files)
+(defun potato--initial-message-from-chain (pos)
+  "Search backwards from POS until the first message in the previous chain has been found.
+Return a list of the following form: (message-id timestamp sender)"
+  (let ((message-pos (previous-single-char-property-change pos 'potato-header)))
+    (list (get-char-property message-pos 'potato-message-id)
+          (get-char-property message-pos 'potato-timestamp)
+          (get-char-property message-pos 'potato-sender))))
+
+(defun potato--timestamp-difference (time0 time1)
+  (let ((parsed0 (date-to-time time0))
+        (parsed1 (date-to-time time1)))
+    (+ (* (- (first parsed1)
+             (first parsed0))
+          (expt 2 16))
+       (- (second parsed1)
+          (second parsed0)))))
+
+(defun potato--insert-message (message-id timestamp updated-date from from-name text image extra-html files)
   (save-excursion
     (goto-char potato--output-marker)
     (let ((new-pos (loop with prev-pos = (point)
@@ -300,12 +317,19 @@
       (goto-char new-pos)
       (let ((inhibit-read-only t))
         (let ((start (point)))
-          (insert (propertize (concat (format "[%s] %s" from (potato--format-date timestamp))
-                                      (if updated-date
-                                          (format " (updated %s)" (potato--format-date updated-date))
-                                        "")
-                                      "\n")
-                              'face 'potato-message-from))
+          ;; If the previous message has the same author and its timestamp is within
+          ;; a certain amount of time, then don't display the header.
+          (let ((prev-message (potato--initial-message-from-chain (point))))
+            (unless (and prev-message
+                         (equal (third prev-message) from)
+                         (< (potato--timestamp-difference (second prev-message) timestamp) 300))
+              (insert (propertize (concat (format "[%s] %s" from-name (potato--format-date timestamp))
+                                          (if updated-date
+                                              (format " (updated %s)" (potato--format-date updated-date))
+                                            "")
+                                          "\n")
+                                  'face 'potato-message-from
+                                  'potato-header t))))
           (when (> (length text) 0)
             (insert (concat text "\n\n")))
           (when image
@@ -328,6 +352,7 @@
                                (list 'read-only t
                                      'potato-message-id message-id
                                      'potato-timestamp timestamp
+                                     'potato-sender from
                                      'front-sticky '(read-only))))))))
 
 (define-derived-mode potato-channel-mode nil "Potato"
@@ -575,6 +600,7 @@
                  (updated-date (potato--assoc-with-check 'updated_date message t))
                  (files (potato--assoc-with-check 'files message t)))
             (potato--insert-message message-id timestamp updated-date
+                                    from
                                     (if user (second user) "Unknown")
                                     (string-trim parsed)
                                     image
