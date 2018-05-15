@@ -606,9 +606,9 @@
   (if potato--users
       (let* ((element (find uid potato--users :key #'car :test #'equal)))
         (if element
-            (setf (cdr (nthcdr 2 element)) (list new-state))
+            (setf (cdr (nthcdr 3 element)) (list new-state))
           ;; ELSE: User was not found in user list, add a stub entry and request an update
-          (push (list uid "(loading)" nil new-state) potato--users)))
+          (push (list uid "(loading)" "" "" nil new-state) potato--users)))
     ;; ELSE: User list has not been updated yet, add the request to pending
     (cl-pushnew (list uid new-state) potato--pending-user-state :key #'car :test #'equal)))
 
@@ -623,7 +623,7 @@
                                              (cl-member v potato--users :key #'car :test #'equal))
                                            uids)))
     (loop for row in potato--users
-          do (setf (fourth row) (if (cl-member (first row) uids :test #'equal) t nil)))
+          do (setf (fifth row) (if (cl-member (first row) uids :test #'equal) t nil)))
     (dolist (uid unregistered-users)
       (potato--update-active-state-for-user-from-id uid t))))
 
@@ -976,7 +976,8 @@
                                          collect (cons (potato--assoc-with-check 'id ch)
                                                        (list (potato--assoc-with-check 'description ch)
                                                              (potato--assoc-with-check 'nickname ch)
-                                                             (potato--assoc-with-check 'image_name ch))))))))
+                                                             (potato--assoc-with-check 'image_name ch)
+                                                             nil)))))))
 
 (defun potato--update-userlist (users)
   (setq potato--users users)
