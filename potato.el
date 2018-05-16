@@ -141,6 +141,21 @@
          (with-current-buffer ,buffer-sym
            ,@body)))))
 
+(cl-defun potato--fill-string (s &key indent)
+  (with-temp-buffer
+    (insert s)
+    (if indent
+        (let ((fill-column indent))
+          (fill-region (point-min) (point-max)))
+      (fill-region (point-min) (point-max)))
+    (goto-char (point-min))
+    (when (and indent (plusp indent))
+      (loop while (zerop (forward-line 1))
+            when (bolp)
+            do (loop repeat indent
+                     do (insert " "))))
+    (buffer-string)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Network tools
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -331,7 +346,7 @@ Return a list of the following form: (message-id timestamp sender)"
                                   'face 'potato-message-from
                                   'potato-header t))))
           (when (> (length text) 0)
-            (insert (concat text "\n\n")))
+            (insert (concat (potato--fill-string text) "\n\n")))
           (when image
             (potato--insert-image (potato--assoc-with-check 'file image))
             (insert "\n"))
